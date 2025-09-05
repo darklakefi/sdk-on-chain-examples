@@ -1,22 +1,25 @@
 use anyhow::{bail, Context, Result};
-use darklake_sdk::{
-    amm::{CancelParams, FinalizeParams, SlashParams},
-    create_darklake_amm, get_pool_key, Amm, SettleParams, SwapMode, SwapParams,
+use sdk_on_chain::{
+    amm::FinalizeParams, AddLiquidityParams, RemoveLiquidityParams, SwapMode, SwapParams
 };
 use serde_json;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    instruction::Instruction,
+    commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
 use std::fs;
-use std::{collections::HashMap, str::FromStr};
+use std::{str::FromStr};
+use tokio::time::{sleep, Duration};
 
 // Default Solana devnet endpoint
 const DEVNET_ENDPOINT: &str = "https://api.devnet.solana.com";
+
+const TOKEN_MINT_X: &str = "DdLxrGFs2sKYbbqVk76eVx9268ASUdTMAhrsqphqDuX";
+const TOKEN_MINT_Y: &str = "HXsKnhXPtGr2mq4uTpxbxyy7ZydYWJwx4zMuYPEDukY"; // Replace with actual token mint
+
 
 /// Load wallet keypair from key.json file
 fn load_wallet_key() -> Result<Keypair> {
@@ -39,87 +42,23 @@ fn load_wallet_key() -> Result<Keypair> {
     Ok(keypair)
 }
 
-async fn manual_order_handling() -> Result<()> {
+async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Complete Example");
     println!("===================================");
 
+    let rpc_client = RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
     // Initialize RPC client with devnet endpoint
-    let rpc_client =
-        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::confirmed());
 
     // Example token mints (you would use real token mints in production)
-    let token_mint_x = Pubkey::from_str("DdLxrGFs2sKYbbqVk76eVx9268ASUdTMAhrsqphqDuX").unwrap(); // Replace with actual token mint
-    let token_mint_y = Pubkey::from_str("HXsKnhXPtGr2mq4uTpxbxyy7ZydYWJwx4zMuYPEDukY").unwrap(); // Replace with actual token mint
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // Replace with actual token mint
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap(); // Replace with actual token mint
 
-    println!("Token X Mint: {}", token_mint_x);
-    println!("Token Y Mint: {}", token_mint_y);
 
-    // Step 1: Get pool key using the SDK
-    let pool_key = get_pool_key(token_mint_x, token_mint_y);
-    println!("Pool Key: {}", pool_key);
-
-    // Step 2: Fetch pool account data from RPC
-    println!("\nFetching pool account data...");
-    let pool_account = rpc_client
-        .get_account(&pool_key)
-        .context("Failed to fetch pool account")?;
-
-    println!("Pool account found:");
-    println!("  Owner: {}", pool_account.owner);
-    println!("  Lamports: {}", pool_account.lamports);
-    println!("  Data length: {} bytes", pool_account.data.len());
-
-    // Step 3: Initialize pool structure using from_keyed_account
-    println!("\nInitializing pool structure...");
-    let mut darklake_amm = create_darklake_amm(pool_key, &pool_account.data)
-        .context("Failed to create Darklake AMM from account data")?;
-
-    println!("✅ Pool structure initialized:");
-    println!("   Label: {}", darklake_amm.label());
-    println!("   Program ID: {}", darklake_amm.program_id());
-    println!("   Key: {}", darklake_amm.key());
-    println!(
-        "   Supports exact out: {}",
-        darklake_amm.supports_exact_out()
-    );
-    println!("   Is active: {}", darklake_amm.is_active());
-
-    // Step 4: Get accounts that need to be updated and update with latest data
-    println!("\nUpdating pool with latest data...");
-    let accounts_to_update = darklake_amm.get_accounts_to_update();
-    println!("Accounts to update: {:?}", accounts_to_update);
-
-    // Fetch all required accounts
-    let mut account_map = HashMap::new();
-    for account_key in &accounts_to_update {
-        if let Ok(account) = rpc_client.get_account(account_key) {
-            account_map.insert(
-                *account_key,
-                darklake_sdk::amm::AccountData {
-                    data: account.data,
-                    owner: account.owner,
-                },
-            );
-        }
-    }
-
-    println!("Account map: {:?}", account_map);
-
-    // Update the AMM with latest data
-    darklake_amm
-        .update(&account_map)
-        .context("Failed to update AMM with latest data")?;
-
-    println!("✅ Pool updated with latest data");
-    println!("   Reserve mints: {:?}", darklake_amm.get_reserve_mints());
-
-    // Step 5: Prepare swap parameters
-    println!("\nPreparing swap transaction...");
-
-    // Load wallet keypair from key.json file
-    let user_keypair = load_wallet_key()?;
-    println!("✅ Wallet loaded successfully:");
-    println!("   Public key: {}", user_keypair.pubkey());
+    println!("Loading pool...");
+    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
 
     let salt = [1, 2, 3, 4, 5, 6, 7, 8];
     let min_out = 1;
@@ -127,557 +66,276 @@ async fn manual_order_handling() -> Result<()> {
     let swap_params = SwapParams {
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
-        token_transfer_authority: user_keypair.pubkey(),
+        token_transfer_authority: sdk.signer_pubkey(),
         in_amount: 1_000, // 1 token (assuming 6 decimals)
         swap_mode: SwapMode::ExactIn,
         min_out, // 0.95 tokens out (5% slippage tolerance)
         salt,    // Random salt for order uniqueness
     };
 
-    // Step 6: Get swap instruction and account metadata
-    let swap_and_account_metas = darklake_amm
-        .get_swap_and_account_metas(&swap_params)
-        .context("Failed to get swap instruction and account metadata")?;
+    let swap_ix = sdk.swap_ix(swap_params).await?;
 
-    println!("✅ Swap instruction prepared:");
-    println!(
-        "   Discriminator: {:?}",
-        swap_and_account_metas.discriminator
-    );
-    println!("   Amount in: {}", swap_and_account_metas.swap.amount_in);
-    println!(
-        "   Is swap X to Y: {}",
-        swap_and_account_metas.swap.is_swap_x_to_y
-    );
-    println!("   C min: {:?}", swap_and_account_metas.swap.c_min);
-    println!(
-        "   Account metas count: {}",
-        swap_and_account_metas.account_metas.len()
-    );
-
-    // Step 7: Build and sign swap transaction
-    println!("\nBuilding and signing swap transaction...");
-
-    // Create the swap instruction
-    let swap_instruction = Instruction {
-        program_id: darklake_amm.program_id(),
-        accounts: swap_and_account_metas.account_metas,
-        data: swap_and_account_metas.data,
-    };
-
-    // Build transaction
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
     let swap_transaction = Transaction::new_signed_with_payer(
-        &[swap_instruction],
-        Some(&user_keypair.pubkey()),
+        &[swap_ix],
+        Some(&sdk.signer_pubkey()),
         &[&user_keypair],
         recent_blockhash,
     );
 
     println!(
-        "✅ Swap transaction built and signed with wallet: {}",
-        user_keypair.pubkey()
-    );
-    println!(
-        "   Transaction signature: {}",
+        "Swap transaction signature: {}",
         swap_transaction.signatures[0]
     );
 
-    // Note: In a real scenario, you would send this transaction
-    let _swap_signature = rpc_client.send_and_confirm_transaction(&swap_transaction)?;
-    println!(
-        "   Swap transaction sent to network (signature: {})",
-        _swap_signature
-    );
+    let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
+        &swap_transaction, 
+        CommitmentConfig { commitment: CommitmentLevel::Finalized }
+    )?;
 
-    // Step 8: Wait for transaction finalization
-    println!("\nWaiting for swap transaction to finalize...");
-    // In production: rpc_client.confirm_transaction(&_swap_signature, &recent_blockhash, CommitmentConfig::finalized())?;
-    println!("   (Simulated - assuming transaction finalized)");
-
-    // Step 9: Prepare settle parameters using the same values from swap
-    println!("\nPreparing settle transaction...");
-
-    let order_key = darklake_amm.get_order_pubkey(user_keypair.pubkey())?;
-    println!("Order key: {}", order_key);
-
-    let order_data = rpc_client
-        .get_account(&order_key)
-        .context("Failed to get order data")?;
-    println!("Order data: {:?}", order_data);
-
-    let (order_output, deadline) = darklake_amm.get_order_output_and_deadline(&order_data.data)?;
-    println!("Order output: {}", order_output);
-
-    // param examples
-
-    let settle_params = SettleParams {
-        settle_signer: user_keypair.pubkey(),
-        order_owner: user_keypair.pubkey(),
-        unwrap_wsol: false,           // Set to true if output is wrapped SOL
-        min_out: swap_params.min_out, // Same min_out as swap
-        salt: swap_params.salt,       // Same salt as swap
-        output: order_output,         // Will be populated by the SDK
-        commitment: swap_and_account_metas.swap.c_min, // Will be populated by the SDK
-        deadline,
-        current_slot: rpc_client.get_slot()?,
-    };
-
-    let cancel_params = CancelParams {
-        settle_signer: user_keypair.pubkey(),
-        order_owner: user_keypair.pubkey(),
-        min_out: swap_params.min_out,
-        salt: swap_params.salt,
-        output: order_output,
-        commitment: swap_and_account_metas.swap.c_min,
-        deadline,
-        current_slot: rpc_client.get_slot()?,
-    };
-
-    let mut slash_params = SlashParams {
-        settle_signer: user_keypair.pubkey(),
-        order_owner: user_keypair.pubkey(),
-        deadline,
-        current_slot: rpc_client.get_slot()?,
-    };
-
-    // slash testing
-    // Wait for order to be outdated with periodic checks
-    // println!("Waiting for order to be outdated...");
-    let mut is_outdated = false;
-    // let mut attempt_count = 0;
-
-    // println!("Waiting for 30 seconds...");
-    // tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-
-    // while !is_outdated {
-    //     slash_params.current_slot = rpc_client.get_slot()?;
-    //     attempt_count += 1;
-    //     is_outdated = darklake_amm.is_order_expired(&order_data.data, slash_params.current_slot)?;
-
-    //     if is_outdated {
-    //         println!("✅ Order is now outdated (attempt {})", attempt_count);
-    //         break;
-    //     }
-
-    //     println!(
-    //         "   Attempt {}: Order not yet outdated, waiting 1 seconds...",
-    //         attempt_count
-    //     );
-    //     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    // }
-
-    if is_outdated {
-        println!("Slashing order -------X");
-        let slash_and_account_metas = darklake_amm.get_slash_and_account_metas(&slash_params)?;
-        let data = slash_and_account_metas.discriminator.to_vec();
-
-        let slash_instruction = Instruction {
-            program_id: darklake_amm.program_id(),
-            accounts: slash_and_account_metas.account_metas,
-            data,
-        };
-
-        let recent_blockhash = rpc_client
-            .get_latest_blockhash()
-            .context("Failed to get recent blockhash")?;
-
-        let slash_transaction = Transaction::new_signed_with_payer(
-            &[slash_instruction],
-            Some(&user_keypair.pubkey()),
-            &[&user_keypair],
-            recent_blockhash,
-        );
-
-        let _slash_signature = rpc_client.send_and_confirm_transaction(&slash_transaction)?;
-        println!(
-            "   Slash transaction sent to network (signature: {})",
-            _slash_signature
-        );
-
-        return Ok(());
-    }
-
-    let is_cancel = order_output < swap_params.min_out;
-
-    if is_cancel {
-        println!("Cancelling order -------|");
-        let cancel_and_account_metas = darklake_amm.get_cancel_and_account_metas(&cancel_params)?;
-
-        let cancel_instruction = Instruction {
-            program_id: darklake_amm.program_id(),
-            accounts: cancel_and_account_metas.account_metas,
-            data: cancel_and_account_metas.data,
-        };
-
-        let recent_blockhash = rpc_client
-            .get_latest_blockhash()
-            .context("Failed to get recent blockhash")?;
-
-        let cancel_transaction = Transaction::new_signed_with_payer(
-            &[cancel_instruction],
-            Some(&user_keypair.pubkey()),
-            &[&user_keypair],
-            recent_blockhash,
-        );
-
-        let _cancel_signature = rpc_client.send_and_confirm_transaction(&cancel_transaction)?;
-        println!(
-            "   Cancel transaction sent to network (signature: {})",
-            _cancel_signature
-        );
-
-        return Ok(());
-    }
-
-    println!("Settling order ------->");
-
-    // Step 10: Get settle instruction and account metadata
-    let settle_and_account_metas = darklake_amm
-        .get_settle_and_account_metas(&settle_params)
-        .context("Failed to get settle instruction and account metadata")?;
-
-    println!("✅ Settle instruction prepared:");
-    println!(
-        "   Discriminator: {:?}",
-        settle_and_account_metas.discriminator
-    );
-    println!(
-        "   Proof A length: {} bytes",
-        settle_and_account_metas.settle.proof_a.len()
-    );
-    println!(
-        "   Proof B length: {} bytes",
-        settle_and_account_metas.settle.proof_b.len()
-    );
-    println!(
-        "   Proof C length: {} bytes",
-        settle_and_account_metas.settle.proof_c.len()
-    );
-    println!(
-        "   Public signals count: {}",
-        settle_and_account_metas.settle.public_signals.len()
-    );
-    println!(
-        "   Unwrap WSOL: {}",
-        settle_and_account_metas.settle.unwrap_wsol
-    );
-    println!(
-        "   Account metas count: {}",
-        settle_and_account_metas.account_metas.len()
-    );
-
-    // Step 11: Build and sign settle transaction
-    println!("\nBuilding and signing settle transaction...");
-
-    // Create the settle instruction
-    let settle_instruction = Instruction {
-        program_id: darklake_amm.program_id(),
-        accounts: settle_and_account_metas.account_metas,
-        data: settle_and_account_metas.data,
-    };
-
-    // Build transaction
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
-
-    let settle_transaction = Transaction::new_signed_with_payer(
-        &[settle_instruction],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
-        recent_blockhash,
-    );
-
-    println!(
-        "✅ Settle transaction built and signed with wallet: {}",
-        user_keypair.pubkey()
-    );
-    println!(
-        "   Transaction signature: {}",
-        settle_transaction.signatures[0]
-    );
-
-    // Note: In a real scenario, you would send this transaction
-    let _settle_signature = rpc_client.send_and_confirm_transaction(&settle_transaction)?;
-    println!(
-        "   Settle transaction sent to network (signature: {})",
-        _settle_signature
-    );
-
-    println!("\n🎉 Complete Darklake AMM flow demonstrated!");
-    println!("   The example shows:");
-    println!("   1. Getting pool key from token mints");
-    println!("   2. Fetching pool data from RPC");
-    println!("   3. Initializing pool structure");
-    println!("   4. Updating with latest data");
-    println!("   5. Preparing and building swap transaction");
-    println!("   6. Preparing and building settle transaction");
-    println!("   ");
-    println!("   Both transactions were signed with the loaded wallet key.");
-    println!("   Note: This example sends actual transactions to devnet.");
-
-    Ok(())
-}
-
-async fn auto_order_handling() -> Result<()> {
-    println!("Darklake DEX SDK - Complete Example");
-    println!("===================================");
-
-    // Initialize RPC client with devnet endpoint
-    let rpc_client =
-        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::confirmed());
-
-    // Example token mints (you would use real token mints in production)
-    let token_mint_x = Pubkey::from_str("DdLxrGFs2sKYbbqVk76eVx9268ASUdTMAhrsqphqDuX").unwrap(); // Replace with actual token mint
-    let token_mint_y = Pubkey::from_str("HXsKnhXPtGr2mq4uTpxbxyy7ZydYWJwx4zMuYPEDukY").unwrap(); // Replace with actual token mint
-
-    println!("Token X Mint: {}", token_mint_x);
-    println!("Token Y Mint: {}", token_mint_y);
-
-    // Step 1: Get pool key using the SDK
-    let pool_key = get_pool_key(token_mint_x, token_mint_y);
-    println!("Pool Key: {}", pool_key);
-
-    // Step 2: Fetch pool account data from RPC
-    println!("\nFetching pool account data...");
-    let pool_account = rpc_client
-        .get_account(&pool_key)
-        .context("Failed to fetch pool account")?;
-
-    println!("Pool account found:");
-    println!("  Owner: {}", pool_account.owner);
-    println!("  Lamports: {}", pool_account.lamports);
-    println!("  Data length: {} bytes", pool_account.data.len());
-
-    // Step 3: Initialize pool structure using from_keyed_account
-    println!("\nInitializing pool structure...");
-    let mut darklake_amm = create_darklake_amm(pool_key, &pool_account.data)
-        .context("Failed to create Darklake AMM from account data")?;
-
-    println!("✅ Pool structure initialized:");
-    println!("   Label: {}", darklake_amm.label());
-    println!("   Program ID: {}", darklake_amm.program_id());
-    println!("   Key: {}", darklake_amm.key());
-    println!(
-        "   Supports exact out: {}",
-        darklake_amm.supports_exact_out()
-    );
-    println!("   Is active: {}", darklake_amm.is_active());
-
-    // Step 4: Get accounts that need to be updated and update with latest data
-    println!("\nUpdating pool with latest data...");
-    let accounts_to_update = darklake_amm.get_accounts_to_update();
-    println!("Accounts to update: {:?}", accounts_to_update);
-
-    // Fetch all required accounts
-    let mut account_map = HashMap::new();
-    for account_key in &accounts_to_update {
-        if let Ok(account) = rpc_client.get_account(account_key) {
-            account_map.insert(
-                *account_key,
-                darklake_sdk::amm::AccountData {
-                    data: account.data,
-                    owner: account.owner,
-                },
-            );
+    // Retry get_order up to 3 times with 3 second delays
+    let mut order = None;
+    for attempt in 1..=3 {
+        match sdk.get_order(user_keypair.pubkey()).await {
+            Ok(result) => {
+                order = Some(result);
+                break;
+            }
+            Err(e) => {
+                if attempt < 3 {
+                    println!("get_order failed (attempt {}): {}. Retrying in 3 seconds...", attempt, e);
+                    sleep(Duration::from_secs(3)).await;
+                } else {
+                    return Err(e.into());
+                }
+            }
         }
     }
+    let order = order.unwrap();
 
-    println!("Account map: {:?}", account_map);
 
-    // Update the AMM with latest data
-    darklake_amm
-        .update(&account_map)
-        .context("Failed to update AMM with latest data")?;
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
 
-    println!("✅ Pool updated with latest data");
-    println!("   Reserve mints: {:?}", darklake_amm.get_reserve_mints());
+    // For testing slashing
 
-    // Step 5: Prepare swap parameters
-    println!("\nPreparing swap transaction...");
+    // // Calculate the difference between current slot and deadline, multiply by 0.4 and wait
+    // let current_slot = rpc_client.get_slot_with_commitment(CommitmentConfig { commitment: CommitmentLevel::Processed })?;
+    // let slot_difference = order.deadline.saturating_sub(current_slot);
+    // let wait_seconds = (slot_difference as f64 * 0.4) as u64 + 1;
+    
+    // println!("Current slot: {}, Deadline: {}, Difference: {} slots", current_slot, order.deadline, slot_difference);
+    // println!("Waiting for {} seconds ({} slots * 0.4)", wait_seconds, slot_difference);
+    
+    // if wait_seconds > 0 {
+    //     sleep(Duration::from_secs(wait_seconds)).await;
+    // }
 
-    // Load wallet keypair from key.json file
-    let user_keypair = load_wallet_key()?;
-    println!("✅ Wallet loaded successfully:");
-    println!("   Public key: {}", user_keypair.pubkey());
-
-    // generate random salt
-    let salt = [1, 2, 3, 4, 5, 6, 7, 8];
-    let min_out = 10000000000;
-
-    let swap_params = SwapParams {
-        source_mint: token_mint_y,
-        destination_mint: token_mint_x,
-        token_transfer_authority: user_keypair.pubkey(),
-        in_amount: 1_000, // 1 token (assuming 6 decimals)
-        swap_mode: SwapMode::ExactIn,
-        min_out, // 0.95 tokens out (5% slippage tolerance)
-        salt,    // Random salt for order uniqueness
-    };
-
-    // Step 6: Get swap instruction and account metadata
-    let swap_and_account_metas = darklake_amm
-        .get_swap_and_account_metas(&swap_params)
-        .context("Failed to get swap instruction and account metadata")?;
-
-    println!("✅ Swap instruction prepared:");
-    println!(
-        "   Discriminator: {:?}",
-        swap_and_account_metas.discriminator
-    );
-    println!("   Amount in: {}", swap_and_account_metas.swap.amount_in);
-    println!(
-        "   Is swap X to Y: {}",
-        swap_and_account_metas.swap.is_swap_x_to_y
-    );
-    println!("   C min: {:?}", swap_and_account_metas.swap.c_min);
-    println!(
-        "   Account metas count: {}",
-        swap_and_account_metas.account_metas.len()
-    );
-
-    // Step 7: Build and sign swap transaction
-    println!("\nBuilding and signing swap transaction...");
-
-    // Create the swap instruction
-    let swap_instruction = Instruction {
-        program_id: darklake_amm.program_id(),
-        accounts: swap_and_account_metas.account_metas,
-        data: swap_and_account_metas.data,
-    };
-
-    // Build transaction
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
-
-    let swap_transaction = Transaction::new_signed_with_payer(
-        &[swap_instruction],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
-        recent_blockhash,
-    );
-
-    println!(
-        "✅ Swap transaction built and signed with wallet: {}",
-        user_keypair.pubkey()
-    );
-    println!(
-        "   Transaction signature: {}",
-        swap_transaction.signatures[0]
-    );
-
-    // Note: In a real scenario, you would send this transaction
-    let _swap_signature = rpc_client.send_and_confirm_transaction(&swap_transaction)?;
-    println!(
-        "   Swap transaction sent to network (signature: {})",
-        _swap_signature
-    );
-
-    // Step 8: Wait for transaction finalization
-    println!("\nWaiting for swap transaction to finalize...");
-    // In production: rpc_client.confirm_transaction(&_swap_signature, &recent_blockhash, CommitmentConfig::finalized())?;
-    println!("   (Simulated - assuming transaction finalized)");
-
-    // Step 9: Prepare settle parameters using the same values from swap
-    println!("\nPreparing settle transaction...");
-
-    let order_key = darklake_amm.get_order_pubkey(user_keypair.pubkey())?;
-    println!("Order key: {}", order_key);
-
-    let order_data = rpc_client
-        .get_account(&order_key)
-        .context("Failed to get order data")?;
-    println!("Order data: {:?}", order_data);
-
-    let (order_output, deadline) = darklake_amm.get_order_output_and_deadline(&order_data.data)?;
-    println!("Order output: {}", order_output);
-
-    // param examples
-
-    // the finalize method will ignore un
-    let mut finalize_params = FinalizeParams {
+    let finalize_params = FinalizeParams {
         settle_signer: user_keypair.pubkey(),
         order_owner: user_keypair.pubkey(),
         unwrap_wsol: false,           // Set to true if output is wrapped SOL
-        min_out: swap_params.min_out, // Same min_out as swap
-        salt: swap_params.salt,       // Same salt as swap
-        output: order_output,         // Will be populated by the SDK
-        commitment: swap_and_account_metas.swap.c_min, // Will be populated by the SDK
-        deadline,
-        current_slot: rpc_client.get_slot()?,
+        min_out, // Same min_out as swap
+        salt,       // Same salt as swap
+        output: order.d_out,         // Will be populated by the SDK
+        commitment: order.c_min, // Will be populated by the SDK
+        deadline: order.deadline,
+        current_slot: rpc_client.get_slot_with_commitment(CommitmentConfig { commitment: CommitmentLevel::Processed })?,
     };
 
-    // For testing slashing
-    // Wait for order to be outdated with periodic checks
-    // println!("Waiting for order to be outdated...");
-    // let mut is_outdated = false;
-    // let mut attempt_count = 0;
-
-    // println!("Waiting for 50 seconds...");
-    // tokio::time::sleep(tokio::time::Duration::from_secs(50)).await;
-
-    // while !is_outdated {
-    //     finalize_params.current_slot = rpc_client.get_slot()?;
-    //     attempt_count += 1;
-    //     is_outdated =
-    //         darklake_amm.is_order_expired(&order_data.data, finalize_params.current_slot)?;
-
-    //     if is_outdated {
-    //         println!("✅ Order is now outdated (attempt {})", attempt_count);
-    //         break;
-    //     }
-
-    //     println!(
-    //         "   Attempt {}: Order not yet outdated, waiting 0.5 seconds...",
-    //         attempt_count
-    //     );
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    // }
-
-    let finalize_and_account_metas =
-        darklake_amm.get_finalize_and_account_metas(&finalize_params)?;
-
-    println!("Finalize instruction: {:?}", finalize_and_account_metas);
-
-    let finalize_instruction = Instruction {
-        program_id: darklake_amm.program_id(),
-        accounts: finalize_and_account_metas.account_metas(),
-        data: finalize_and_account_metas.data(),
-    };
+    let finalize_ix = sdk.finalize_ix(finalize_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
     let finalize_transaction = Transaction::new_signed_with_payer(
-        &[finalize_instruction],
-        Some(&user_keypair.pubkey()),
+        &[finalize_ix],
+        Some(&sdk.signer_pubkey()),
         &[&user_keypair],
         recent_blockhash,
     );
 
-    let _finalize_signature = rpc_client.send_and_confirm_transaction(&finalize_transaction)?;
+    let _finalize_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
+        &finalize_transaction, 
+        CommitmentConfig { commitment: CommitmentLevel::Processed }
+    )?;
+
     println!(
-        "   Settle transaction sent to network (signature: {})",
-        _finalize_signature
+        "Finalize transaction signature: {}",
+        finalize_transaction.signatures[0]
     );
 
-    println!("\n🎉 Complete Darklake AMM flow demonstrated!");
-    println!("   The example shows:");
-    println!("   1. Getting pool key from token mints");
-    println!("   2. Fetching pool data from RPC");
-    println!("   3. Initializing pool structure");
-    println!("   4. Updating with latest data");
-    println!("   5. Preparing and building swap transaction");
-    println!("   6. Preparing and building settle transaction");
-    println!("   ");
-    println!("   Both transactions were signed with the loaded wallet key.");
-    println!("   Note: This example sends actual transactions to devnet.");
+    Ok(())
+}
+
+async fn swap(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
+    println!("Darklake DEX SDK - Complete Example");
+    println!("===================================");
+
+    // Example token mints (you would use real token mints in production)
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // Replace with actual token mint
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap(); // Replace with actual token mint
+
+    println!("Token X Mint: {}", token_mint_x);
+    println!("Token Y Mint: {}", token_mint_y);
+
+    let res_quote = sdk.quote(token_mint_x, token_mint_y, 1_000).await?;
+
+    println!("Quote: {:?}", res_quote);
+
+    let res_swap = sdk.swap(
+        token_mint_x,
+        token_mint_y,
+        1_000,
+        1_000_000_000_000_000_000
+    ).await?;
+
+    println!("Swap: {:?}", res_swap);
+
+    Ok(())
+}
+
+async fn manual_add_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+    println!("Darklake DEX SDK - Complete Example");
+    println!("===================================");
+
+
+    let rpc_client = RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+    // Initialize RPC client with devnet endpoint
+
+    // Example token mints (you would use real token mints in production)
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // Replace with actual token mint
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap(); // Replace with actual token mint
+
+
+    println!("Loading pool...");
+    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
+
+
+    let add_liquidity_params = AddLiquidityParams {
+        user: user_keypair.pubkey(),
+        amount_lp: 20,
+        max_amount_x: 1_000,
+        max_amount_y: 1_000,
+    };
+
+    let add_liquidity_ix = sdk.add_liquidity_ix(add_liquidity_params).await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    let add_liquidity_transaction = Transaction::new_signed_with_payer(
+        &[add_liquidity_ix],
+        Some(&sdk.signer_pubkey()),
+        &[&user_keypair],
+        recent_blockhash,
+    );
+
+    let _add_liquidity_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
+        &add_liquidity_transaction, 
+        CommitmentConfig { commitment: CommitmentLevel::Finalized }
+    )?;
+
+    println!(
+        "Add Liquidity transaction signature: {}",
+        add_liquidity_transaction.signatures[0]
+    );
+
+    Ok(())
+}
+
+async fn add_liquidity(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
+    println!("Darklake DEX SDK - Complete Example");
+    println!("===================================");
+
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // Replace with actual token mint
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap(); // Replace with actual token mint
+
+    println!("Token X Mint: {}", token_mint_x);
+    println!("Token Y Mint: {}", token_mint_y);
+
+    let res_add_liquidity = sdk.add_liquidity(token_mint_x, token_mint_y, 1_000, 1_000, 20).await?;
+
+    println!("Add Liquidity: {:?}", res_add_liquidity);
+
+    Ok(())
+}
+
+async fn manual_remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+    println!("Darklake DEX SDK - Complete Example");
+    println!("===================================");
+
+
+    let rpc_client = RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+    // Initialize RPC client with devnet endpoint
+
+    // Example token mints (you would use real token mints in production)
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // Replace with actual token mint
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap(); // Replace with actual token mint
+
+
+    println!("Loading pool...");
+    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
+
+
+    let remove_liquidity_params = RemoveLiquidityParams {
+        user: user_keypair.pubkey(),
+        amount_lp: 20,
+        min_amount_x: 1,
+        min_amount_y: 1,
+    };
+
+    let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params).await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    let remove_liquidity_transaction = Transaction::new_signed_with_payer(
+        &[remove_liquidity_ix],
+        Some(&sdk.signer_pubkey()),
+        &[&user_keypair],
+        recent_blockhash,
+    );
+
+    let _remove_liquidity_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
+        &remove_liquidity_transaction, 
+        CommitmentConfig { commitment: CommitmentLevel::Finalized }
+    )?;
+
+    println!(
+        "Remove Liquidity transaction signature: {}",
+        remove_liquidity_transaction.signatures[0]
+    );
+
+    Ok(())
+}
+
+async fn remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
+    println!("Darklake DEX SDK - Complete Example");
+    println!("===================================");
+
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // Replace with actual token mint
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap(); // Replace with actual token mint
+
+    println!("Token X Mint: {}", token_mint_x);
+    println!("Token Y Mint: {}", token_mint_y);
+
+    let res_remove_liquidity = sdk.remove_liquidity(token_mint_x, token_mint_y, 1, 1, 20).await?;
+
+    println!("Remove Liquidity: {:?}", res_remove_liquidity);
+
 
     Ok(())
 }
@@ -689,20 +347,42 @@ async fn main() -> Result<()> {
     if args.len() < 2 {
         println!("Usage: {} <function_name>", args[0]);
         println!("Available functions:");
-        println!("  manual  - Run manual_order_finalize()");
-        println!("  helper  - Run helper_order_finalize()");
+        println!("  manual_swap  - Run manual_swap()");
+        println!("  swap  - Run swap()");
+        println!("  manual_add_liquidity  - Run manual_add_liquidity()");
+        println!("  add_liquidity  - Run add_liquidity()");
+        println!("  manual_remove_liquidity  - Run manual_remove_liquidity()");
+        println!("  remove_liquidity  - Run remove_liquidity()");
         return Ok(());
     }
 
+    let sdk = sdk_on_chain::DarklakeSDK::new(DEVNET_ENDPOINT, load_wallet_key()?);
+
     match args[1].as_str() {
-        "manual" => {
-            println!("Running manual_order_finalize()...");
-            manual_order_handling().await
+        "manual_swap" => {
+            println!("Running manual_swap()...");
+            manual_swap(sdk, load_wallet_key()?).await
         }
-        "auto" => {
-            println!("Running auto_order_handling()...");
-            auto_order_handling().await
-        }
+        "swap" => {
+            println!("Running swap()...");
+            swap(sdk).await
+        },
+        "manual_add_liquidity" => {
+            println!("Running manual_add_liquidity()...");
+            manual_add_liquidity(sdk, load_wallet_key()?).await
+        },
+        "add_liquidity" => {
+            println!("Running add_liquidity()...");
+            add_liquidity(sdk).await
+        },
+        "manual_remove_liquidity" => {
+            println!("Running manual_remove_liquidity()...");
+            manual_remove_liquidity(sdk, load_wallet_key()?).await
+        },
+        "remove_liquidity" => {
+            println!("Running remove_liquidity()...");
+            remove_liquidity(sdk).await
+        },
         _ => {
             println!("Unknown function: {}", args[1]);
             println!("Available functions: manual, helper");
