@@ -201,13 +201,8 @@ async fn swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Resu
     let unwrap_wsol = token_mint_y == Pubkey::from_str(SOL_MINT).unwrap();
 
     // Swap tx
-    let (mut swap_tx_, order_key, min_out, salt) = sdk.swap_tx(
-            token_mint_x,
-            token_mint_y,
-            1_000,
-            1,
-            user_keypair.pubkey(),
-        )
+    let (mut swap_tx_, order_key, min_out, salt) = sdk
+        .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
         .await?;
 
     let rpc_client =
@@ -224,7 +219,9 @@ async fn swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Resu
     println!("Swap: {:?}", res);
 
     // last pubkey is the settler if not provided the tx will assume it's the same as the order owner
-    let (mut finalize_tx) = sdk.finalize_tx(order_key, unwrap_wsol, min_out, salt, None).await?;
+    let (mut finalize_tx) = sdk
+        .finalize_tx(order_key, unwrap_wsol, min_out, salt, None)
+        .await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -306,7 +303,14 @@ async fn add_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
     println!("Token Y Mint: {}", token_mint_y);
 
     let (mut add_liquidity_tx) = sdk
-        .add_liquidity_tx(token_mint_x, token_mint_y, 1_000, 1_000, 20, user_keypair.pubkey())
+        .add_liquidity_tx(
+            token_mint_x,
+            token_mint_y,
+            1_000,
+            1_000,
+            20,
+            user_keypair.pubkey(),
+        )
         .await?;
 
     let rpc_client =
@@ -405,7 +409,7 @@ async fn remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keyp
     remove_liquidity_tx.sign(&[&user_keypair], recent_blockhash);
 
     let res = rpc_client.send_and_confirm_transaction_with_spinner(&remove_liquidity_tx)?;
-    
+
     println!("Remove Liquidity: {:?}", res);
 
     Ok(())
@@ -701,7 +705,9 @@ async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
 
     println!("Quote: {:?}", res_quote);
 
-    let (mut swap_tx_, order_key, min_out, salt) = sdk.swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey()).await?;
+    let (mut swap_tx_, order_key, min_out, salt) = sdk
+        .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
+        .await?;
 
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
@@ -716,7 +722,9 @@ async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
 
     println!("Swap: {:?}", res);
 
-    let (mut finalize_tx) = sdk.finalize_tx(order_key, true, min_out, salt, None).await?;
+    let (mut finalize_tx) = sdk
+        .finalize_tx(order_key, true, min_out, salt, None)
+        .await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -735,7 +743,6 @@ async fn swap_to_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
     println!("Darklake DEX SDK - Swap To SOL Example");
     println!("======================================");
 
-
     let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // DuX
     let token_mint_y = Pubkey::from_str(SOL_MINT).unwrap(); // SOL
 
@@ -746,7 +753,9 @@ async fn swap_to_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
 
     println!("Quote: {:?}", res_quote);
 
-    let (mut swap_tx_, order_key, min_out, salt) = sdk.swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey()).await?;
+    let (mut swap_tx_, order_key, min_out, salt) = sdk
+        .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
+        .await?;
 
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
@@ -761,7 +770,9 @@ async fn swap_to_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
 
     println!("Swap: {:?}", res);
 
-    let (mut finalize_tx) = sdk.finalize_tx(order_key, true, min_out, salt, None).await?;
+    let (mut finalize_tx) = sdk
+        .finalize_tx(order_key, true, min_out, salt, None)
+        .await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -810,7 +821,7 @@ async fn manual_add_liquidity_sol(
     let add_liquidity_params = AddLiquidityParams {
         user: user_keypair.pubkey(),
         amount_lp: 20,
-        max_amount_x: sol_amount,  // SOL amount (will be wrapped to WSOL)
+        max_amount_x: sol_amount,   // SOL amount (will be wrapped to WSOL)
         max_amount_y: token_amount, // DuX token amount
     };
 
@@ -833,10 +844,8 @@ async fn manual_add_liquidity_sol(
 
     // Optionally you can close the WSOL ATA after adding liquidity as it may contain some WSOL that wasn't used
 
-    let _add_liquidity_signature = rpc_client
-        .send_and_confirm_transaction_with_spinner(
-            &add_liquidity_transaction,
-        )?;
+    let _add_liquidity_signature =
+        rpc_client.send_and_confirm_transaction_with_spinner(&add_liquidity_transaction)?;
 
     println!(
         "Add Liquidity transaction signature: {}",
@@ -872,16 +881,15 @@ async fn manual_remove_liquidity_sol(
     let remove_liquidity_params = RemoveLiquidityParams {
         user: user_keypair.pubkey(),
         amount_lp: 20,
-        min_amount_x: 1,  // Minimum SOL amount to receive
-        min_amount_y: 1,  // Minimum DuX token amount to receive
+        min_amount_x: 1, // Minimum SOL amount to receive
+        min_amount_y: 1, // Minimum DuX token amount to receive
     };
 
     let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params).await?;
 
     // Generate WSOL unwrapping instructions to close the WSOL ATA
     println!("Generating WSOL unwrapping instructions...");
-    let unwrap_instructions =
-        utils::get_unwrap_wsol_to_sol_instructions(user_keypair.pubkey())?;
+    let unwrap_instructions = utils::get_unwrap_wsol_to_sol_instructions(user_keypair.pubkey())?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -898,10 +906,8 @@ async fn manual_remove_liquidity_sol(
         recent_blockhash,
     );
 
-    let _remove_liquidity_signature = rpc_client
-        .send_and_confirm_transaction_with_spinner(
-            &remove_liquidity_transaction
-        )?;
+    let _remove_liquidity_signature =
+        rpc_client.send_and_confirm_transaction_with_spinner(&remove_liquidity_transaction)?;
 
     println!(
         "Remove Liquidity transaction signature: {}",
