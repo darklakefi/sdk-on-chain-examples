@@ -5046,7 +5046,7 @@ dependencies = [
 [[package]]
 name = "sdk-on-chain"
 version = "0.1.5"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=fix%2Fdar-712-example-fixes#6e719a62280490d59701a54dc114b7a0342882f5"
+source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=fix%2Fdar-712-example-fixes#221621406ad26cc9d870a23fa02b4ef00a7f4a7c"
 dependencies = [
  "anchor-client",
  "anchor-lang",

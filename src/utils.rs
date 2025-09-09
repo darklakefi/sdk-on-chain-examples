@@ -1,7 +1,7 @@
 use anyhow::Result;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, system_instruction};
 use spl_associated_token_account::get_associated_token_address;
-use spl_token::{instruction::sync_native, native_mint};
+use spl_token::{instruction::{sync_native, close_account}, native_mint};
 
 pub fn get_wrap_sol_to_wsol_instructions(
     payer: Pubkey,
@@ -34,6 +34,35 @@ pub fn get_wrap_sol_to_wsol_instructions(
     instructions.push(create_ata_ix);
     instructions.push(transfer_sol_ix);
     instructions.push(sync_native_ix);
+
+    Ok(instructions)
+}
+
+pub fn get_unwrap_wsol_to_sol_instructions(
+    payer: Pubkey,
+) -> Result<Vec<Instruction>> {
+    let mut instructions = Vec::new();
+
+    let token_mint_wsol = native_mint::ID;
+    let token_program_id = spl_token::ID;
+
+    // 1. Get the associated token account for WSOL
+    let wsol_ata = get_associated_token_address(&payer, &token_mint_wsol);
+
+    // 2. Sync native to update the balance
+    let sync_native_ix = sync_native(&token_program_id, &wsol_ata)?;
+
+    // 3. Close the WSOL account to convert back to SOL
+    let close_account_ix = close_account(
+        &token_program_id,
+        &wsol_ata,  // account to close
+        &payer,     // destination for lamports
+        &payer,     // owner of the account
+        &[],        // multisig signers (empty for single signer)
+    )?;
+
+    instructions.push(sync_native_ix);
+    instructions.push(close_account_ix);
 
     Ok(instructions)
 }
