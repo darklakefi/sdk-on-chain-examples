@@ -3,7 +3,7 @@ use sdk_on_chain::{
     amm::FinalizeParams, AddLiquidityParams, RemoveLiquidityParams, SwapMode, SwapParams,
 };
 use serde_json;
-use solana_rpc_client::{rpc_client::RpcClient};
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
@@ -529,15 +529,7 @@ async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
 
     println!("Quote: {:?}", res_quote);
 
-    let res_swap = sdk
-        .swap(
-            token_mint_x,
-            token_mint_y,
-            1_000,
-            1,
-            None,
-        )
-        .await?;
+    let res_swap = sdk.swap(token_mint_x, token_mint_y, 1_000, 1, None).await?;
 
     println!("Swap: {:?}", res_swap);
 
