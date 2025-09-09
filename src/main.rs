@@ -878,6 +878,14 @@ async fn manual_remove_liquidity_sol(
     println!("Updating accounts...");
     sdk.update_accounts().await?;
 
+    let create_wsol_ata_ix =
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+            &user_keypair.pubkey(),
+            &user_keypair.pubkey(),
+            &native_mint::ID,
+            &spl_token::ID,
+        );
+
     let remove_liquidity_params = RemoveLiquidityParams {
         user: user_keypair.pubkey(),
         amount_lp: 20,
@@ -896,7 +904,7 @@ async fn manual_remove_liquidity_sol(
         .context("Failed to get recent blockhash")?;
 
     // Combine remove liquidity instruction with unwrap instructions
-    let mut all_instructions = vec![remove_liquidity_ix];
+    let mut all_instructions = vec![create_wsol_ata_ix, remove_liquidity_ix];
     all_instructions.extend(unwrap_instructions);
 
     let remove_liquidity_transaction = Transaction::new_signed_with_payer(
@@ -917,15 +925,75 @@ async fn manual_remove_liquidity_sol(
     Ok(())
 }
 
-async fn remove_liquidity_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
-    // TODO: Implement remove liquidity with SOL
-    println!("remove_liquidity_sol - Not implemented yet");
+async fn remove_liquidity_sol(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+) -> Result<()> {
+    println!("Darklake DEX SDK - Remove liquidity with SOL");
+    println!("=============================================");
+
+    let token_mint_x = Pubkey::from_str(SOL_MINT).unwrap(); // SOL
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // DuX token
+
+    println!("Token X Mint (SOL): {}", token_mint_x);
+    println!("Token Y Mint (DuX): {}", token_mint_y);
+
+    let mut remove_liquidity_tx = sdk
+        .remove_liquidity_tx(token_mint_x, token_mint_y, 1, 1, 20, user_keypair.pubkey())
+        .await?;
+
+    let rpc_client =
+        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    remove_liquidity_tx.sign(&[&user_keypair], recent_blockhash);
+
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&remove_liquidity_tx)?;
+
+    println!("Remove Liquidity: {:?}", res);
+
     Ok(())
 }
 
-async fn add_liquidity_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
-    // TODO: Implement add liquidity with SOL
-    println!("add_liquidity_sol - Not implemented yet");
+async fn add_liquidity_sol(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+) -> Result<()> {
+    println!("Darklake DEX SDK - Add liquidity with SOL");
+    println!("==========================================");
+
+    let token_mint_x = Pubkey::from_str(SOL_MINT).unwrap(); // SOL
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // DuX token
+
+    println!("Token X Mint (SOL): {}", token_mint_x);
+    println!("Token Y Mint (DuX): {}", token_mint_y);
+
+    let mut add_liquidity_tx = sdk
+        .add_liquidity_tx(
+            token_mint_x,
+            token_mint_y,
+            1_000,
+            1_000,
+            20,
+            user_keypair.pubkey(),
+        )
+        .await?;
+
+    let rpc_client =
+        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    add_liquidity_tx.sign(&[&user_keypair], recent_blockhash);
+
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&add_liquidity_tx)?;
+    println!("Add Liquidity: {:?}", res);
+
     Ok(())
 }
 
@@ -1001,11 +1069,11 @@ async fn main() -> Result<()> {
         }
         "remove_liquidity_sol" => {
             println!("Running remove_liquidity_sol()...");
-            remove_liquidity_sol(sdk).await
+            remove_liquidity_sol(sdk, load_wallet_key()?).await
         }
         "add_liquidity_sol" => {
             println!("Running add_liquidity_sol()...");
-            add_liquidity_sol(sdk).await
+            add_liquidity_sol(sdk, load_wallet_key()?).await
         }
         _ => {
             println!("Unknown function: {}", args[1]);
