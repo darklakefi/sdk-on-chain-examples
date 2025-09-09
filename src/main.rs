@@ -3,7 +3,7 @@ use sdk_on_chain::{
     amm::FinalizeParams, AddLiquidityParams, RemoveLiquidityParams, SwapMode, SwapParams,
 };
 use serde_json;
-use solana_rpc_client::rpc_client::RpcClient;
+use solana_rpc_client::{rpc_client::RpcClient};
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
@@ -17,12 +17,12 @@ use tokio::time::{sleep, Duration};
 
 pub mod utils;
 
-
 // Default Solana devnet endpoint
 const DEVNET_ENDPOINT: &str = "https://api.devnet.solana.com";
 
 const TOKEN_MINT_X: &str = "DdLxrGFs2sKYbbqVk76eVx9268ASUdTMAhrsqphqDuX";
 const TOKEN_MINT_Y: &str = "HXsKnhXPtGr2mq4uTpxbxyy7ZydYWJwx4zMuYPEDukY"; // Replace with actual token mint
+const SOL_MINT: &str = "So11111111111111111111111111111111111111111";
 
 /// Load wallet keypair from key.json file
 fn load_wallet_key() -> Result<Keypair> {
@@ -199,7 +199,13 @@ async fn swap(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
     println!("Quote: {:?}", res_quote);
 
     let res_swap = sdk
-        .swap(token_mint_x, token_mint_y, 1_000, 1_000_000_000_000_000_000, None)
+        .swap(
+            token_mint_x,
+            token_mint_y,
+            1_000,
+            1_000_000_000_000_000_000,
+            None,
+        )
         .await?;
 
     println!("Swap: {:?}", res_swap);
@@ -389,13 +395,11 @@ async fn manual_swap_from_sol(
 
     // Generate WSOL wrapping instructions
     println!("Generating WSOL wrapping instructions...");
-    let wrap_instructions = utils::get_wrap_sol_to_wsol_instructions(
-        user_keypair.pubkey(),
-        sol_amount,
-    )?;
+    let wrap_instructions =
+        utils::get_wrap_sol_to_wsol_instructions(user_keypair.pubkey(), sol_amount)?;
 
     let swap_params = SwapParams {
-        source_mint: token_mint_x, // WSOL
+        source_mint: token_mint_x,      // WSOL
         destination_mint: token_mint_y, // DuX
         token_transfer_authority: sdk.signer_pubkey(),
         in_amount: sol_amount,
@@ -511,8 +515,32 @@ async fn manual_swap_to_sol(
 }
 
 async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
-    // TODO: Implement swap from SOL
-    println!("swap_from_sol - Not implemented yet");
+    println!("Darklake DEX SDK - Swap From SOL Example");
+    println!("=========================================");
+
+    // WSOL (wrapped SOL) and DuX token mints
+    let token_mint_x = Pubkey::from_str(SOL_MINT).unwrap(); // SOL
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // DuX
+
+    println!("Token X Mint (SOL): {}", token_mint_x);
+    println!("Token Y Mint (DuX): {}", token_mint_y);
+
+    let res_quote = sdk.quote(token_mint_x, token_mint_y, 1_000).await?;
+
+    println!("Quote: {:?}", res_quote);
+
+    let res_swap = sdk
+        .swap(
+            token_mint_x,
+            token_mint_y,
+            1_000,
+            1,
+            None,
+        )
+        .await?;
+
+    println!("Swap: {:?}", res_swap);
+
     Ok(())
 }
 
@@ -591,12 +619,12 @@ async fn main() -> Result<()> {
             println!("Running manual_remove_liquidity()...");
             manual_remove_liquidity(sdk, load_wallet_key()?).await
         }
-      
+
         "remove_liquidity" => {
             println!("Running remove_liquidity()...");
             remove_liquidity(sdk).await
         }
-       
+
         // SOL
         "manual_swap_from_sol" => {
             println!("Running manual_swap_from_sol()...");
