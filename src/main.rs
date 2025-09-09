@@ -219,7 +219,7 @@ async fn swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Resu
     println!("Swap: {:?}", res);
 
     // last pubkey is the settler if not provided the tx will assume it's the same as the order owner
-    let (mut finalize_tx) = sdk
+    let mut finalize_tx = sdk
         .finalize_tx(order_key, unwrap_wsol, min_out, salt, None)
         .await?;
 
@@ -302,7 +302,7 @@ async fn add_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
     println!("Token X Mint: {}", token_mint_x);
     println!("Token Y Mint: {}", token_mint_y);
 
-    let (mut add_liquidity_tx) = sdk
+    let mut add_liquidity_tx = sdk
         .add_liquidity_tx(
             token_mint_x,
             token_mint_y,
@@ -395,7 +395,7 @@ async fn remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keyp
     println!("Token X Mint: {}", token_mint_x);
     println!("Token Y Mint: {}", token_mint_y);
 
-    let (mut remove_liquidity_tx) = sdk
+    let mut remove_liquidity_tx = sdk
         .remove_liquidity_tx(token_mint_x, token_mint_y, 1, 1, 20, user_keypair.pubkey())
         .await?;
 
@@ -722,7 +722,7 @@ async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
 
     println!("Swap: {:?}", res);
 
-    let (mut finalize_tx) = sdk
+    let mut finalize_tx = sdk
         .finalize_tx(order_key, true, min_out, salt, None)
         .await?;
 
@@ -770,7 +770,7 @@ async fn swap_to_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
 
     println!("Swap: {:?}", res);
 
-    let (mut finalize_tx) = sdk
+    let mut finalize_tx = sdk
         .finalize_tx(order_key, true, min_out, salt, None)
         .await?;
 
