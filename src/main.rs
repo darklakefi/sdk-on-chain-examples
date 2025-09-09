@@ -183,8 +183,11 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
     Ok(())
 }
 
-
-async fn manual_swap_different_settler(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair, settler: Keypair) -> Result<()> {
+async fn manual_swap_different_settler(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+    settler: Keypair,
+) -> Result<()> {
     println!("Darklake DEX SDK - Manual Swap");
     println!("===============================");
 
@@ -360,7 +363,11 @@ async fn swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Resu
     Ok(())
 }
 
-async fn swap_different_settler(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair, settler: Keypair) -> Result<()> {
+async fn swap_different_settler(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+    settler: Keypair,
+) -> Result<()> {
     println!("Darklake DEX SDK - Swap Different Settler");
     println!("==========================================");
 
@@ -397,7 +404,13 @@ async fn swap_different_settler(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair
 
     // last pubkey is the settler if not provided the tx will assume it's the same as the order owner
     let mut finalize_tx = sdk
-        .finalize_tx(order_key, unwrap_wsol, min_out, salt, Some(settler.pubkey()))
+        .finalize_tx(
+            order_key,
+            unwrap_wsol,
+            min_out,
+            salt,
+            Some(settler.pubkey()),
+        )
         .await?;
 
     let recent_blockhash = rpc_client
@@ -411,7 +424,6 @@ async fn swap_different_settler(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair
 
     Ok(())
 }
-
 
 async fn manual_add_liquidity(
     mut sdk: sdk_on_chain::DarklakeSDK,
@@ -1190,12 +1202,12 @@ async fn main() -> Result<()> {
         println!("  remove_liquidity  - remove liquidity using remove_liquidity_tx");
         println!("  manual_swap_different_settler  - swaps using swap_ix with a different settler");
         println!("  swap_different_settler  - swaps using swap_tx with a different settler");
-        
+
         println!("  manual_add_liquidity_sol  - add liquidity using add_liquidity_ix with SOL");
         println!("  manual_remove_liquidity_sol  - remove liquidity (one of the tokens is SOL) using remove_liquidity_ix");
         println!("  remove_liquidity_sol  - remove liquidity (one of the tokens is SOL) using remove_liquidity_tx");
         println!("  add_liquidity_sol  - add liquidity (one of the tokens is SOL) using add_liquidity_tx");
-        
+
         println!("  manual_swap_from_sol  - swaps from SOL using swap_ix");
         println!("  manual_swap_to_sol  - swaps to SOL using swap_ix");
         println!("  swap_from_sol  - swaps from SOL using swap_tx");
@@ -1215,7 +1227,12 @@ async fn main() -> Result<()> {
         }
         "manual_swap_different_settler" => {
             println!("Running manual_swap_different_settler()...");
-            manual_swap_different_settler(sdk, load_keypair(user_key_filename)?, load_keypair(settler_key_filename)?).await
+            manual_swap_different_settler(
+                sdk,
+                load_keypair(user_key_filename)?,
+                load_keypair(settler_key_filename)?,
+            )
+            .await
         }
         "swap" => {
             println!("Running swap()...");
@@ -1223,7 +1240,12 @@ async fn main() -> Result<()> {
         }
         "swap_different_settler" => {
             println!("Running swap_different_settler()...");
-            swap_different_settler(sdk, load_keypair(user_key_filename)?, load_keypair(settler_key_filename)?).await
+            swap_different_settler(
+                sdk,
+                load_keypair(user_key_filename)?,
+                load_keypair(settler_key_filename)?,
+            )
+            .await
         }
         "manual_add_liquidity" => {
             println!("Running manual_add_liquidity()...");
