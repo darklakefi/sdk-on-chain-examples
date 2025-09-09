@@ -5045,8 +5045,8 @@ dependencies = [
 
 [[package]]
 name = "sdk-on-chain"
-version = "0.1.3"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=feature%2Fdar-705-sdk-restructure#2fb1fea9738398ddfe099527b0faacd2ee2019af"
+version = "0.1.4"
+source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=main#49749102e331f93cd61a4f2ad641d29f1d860545"
 dependencies = [
  "anchor-client",
  "anchor-lang",
@@ -5065,6 +5065,7 @@ dependencies = [
  "bincode",
  "dex-math",
  "hex",
+ "lazy_static",
  "log",
  "num-bigint 0.4.6",
  "num-traits",
@@ -5097,6 +5098,8 @@ dependencies = [
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-transaction-status",
+ "spl-associated-token-account 7.0.0",
+ "spl-token 8.0.0",
  "tokio",
 ]
 

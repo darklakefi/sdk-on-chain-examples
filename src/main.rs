@@ -10,9 +10,13 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
+use spl_token::native_mint;
 use std::fs;
 use std::str::FromStr;
 use tokio::time::{sleep, Duration};
+
+pub mod utils;
+
 
 // Default Solana devnet endpoint
 const DEVNET_ENDPOINT: &str = "https://api.devnet.solana.com";
@@ -195,7 +199,7 @@ async fn swap(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
     println!("Quote: {:?}", res_quote);
 
     let res_swap = sdk
-        .swap(token_mint_x, token_mint_y, 1_000, 1_000_000_000_000_000_000)
+        .swap(token_mint_x, token_mint_y, 1_000, 1_000_000_000_000_000_000, None)
         .await?;
 
     println!("Swap: {:?}", res_swap);
@@ -355,6 +359,199 @@ async fn remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
     Ok(())
 }
 
+// SOL template functions
+async fn manual_swap_from_sol(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+) -> Result<()> {
+    println!("Darklake DEX SDK - Manual Swap From SOL Example");
+    println!("================================================");
+
+    let rpc_client =
+        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+
+    // WSOL (wrapped SOL) and DuX token mints
+    let token_mint_x = native_mint::ID; // WSOL
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_X).unwrap(); // DuX
+
+    println!("Token X Mint (WSOL): {}", token_mint_x);
+    println!("Token Y Mint (DuX): {}", token_mint_y);
+
+    println!("Loading pool...");
+    sdk.load_pool(token_mint_x, token_mint_y).await?;
+
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
+
+    let salt = [1, 2, 3, 4, 5, 6, 7, 8];
+    let min_out = 1;
+    let sol_amount = 1_000; // 0.001 SOL in lamports
+
+    // Generate WSOL wrapping instructions
+    println!("Generating WSOL wrapping instructions...");
+    let wrap_instructions = utils::get_wrap_sol_to_wsol_instructions(
+        user_keypair.pubkey(),
+        sol_amount,
+    )?;
+
+    let swap_params = SwapParams {
+        source_mint: token_mint_x, // WSOL
+        destination_mint: token_mint_y, // DuX
+        token_transfer_authority: sdk.signer_pubkey(),
+        in_amount: sol_amount,
+        swap_mode: SwapMode::ExactIn,
+        min_out,
+        salt,
+    };
+
+    let swap_ix = sdk.swap_ix(swap_params).await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    // Combine wrap instructions with swap instruction
+    let mut all_instructions = wrap_instructions;
+    all_instructions.push(swap_ix);
+
+    let swap_transaction = Transaction::new_signed_with_payer(
+        &all_instructions,
+        Some(&sdk.signer_pubkey()),
+        &[&user_keypair],
+        recent_blockhash,
+    );
+
+    println!(
+        "Swap transaction signature: {}",
+        swap_transaction.signatures[0]
+    );
+
+    let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
+        &swap_transaction,
+        CommitmentConfig {
+            commitment: CommitmentLevel::Finalized,
+        },
+    )?;
+
+    // Retry get_order up to 3 times with 3 second delays
+    let mut order = None;
+    for attempt in 1..=3 {
+        match sdk.get_order(user_keypair.pubkey()).await {
+            Ok(result) => {
+                order = Some(result);
+                break;
+            }
+            Err(e) => {
+                if attempt < 3 {
+                    println!(
+                        "get_order failed (attempt {}): {}. Retrying in 3 seconds...",
+                        attempt, e
+                    );
+                    sleep(Duration::from_secs(3)).await;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+    let order = order.unwrap();
+
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
+
+    let finalize_params = FinalizeParams {
+        settle_signer: user_keypair.pubkey(),
+        order_owner: user_keypair.pubkey(),
+        unwrap_wsol: true, // Set to true since we're swapping from WSOL
+        min_out,
+        salt,
+        output: order.d_out,
+        commitment: order.c_min,
+        deadline: order.deadline,
+        current_slot: rpc_client.get_slot_with_commitment(CommitmentConfig {
+            commitment: CommitmentLevel::Processed,
+        })?,
+    };
+
+    let finalize_ix = sdk.finalize_ix(finalize_params).await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    let finalize_transaction = Transaction::new_signed_with_payer(
+        &[finalize_ix],
+        Some(&sdk.signer_pubkey()),
+        &[&user_keypair],
+        recent_blockhash,
+    );
+
+    let _finalize_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
+        &finalize_transaction,
+        CommitmentConfig {
+            commitment: CommitmentLevel::Processed,
+        },
+    )?;
+
+    println!(
+        "Finalize transaction signature: {}",
+        finalize_transaction.signatures[0]
+    );
+
+    Ok(())
+}
+
+async fn manual_swap_to_sol(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+) -> Result<()> {
+    // TODO: Implement manual swap to SOL
+    println!("manual_swap_to_sol - Not implemented yet");
+    Ok(())
+}
+
+async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
+    // TODO: Implement swap from SOL
+    println!("swap_from_sol - Not implemented yet");
+    Ok(())
+}
+
+async fn swap_to_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
+    // TODO: Implement swap to SOL
+    println!("swap_to_sol - Not implemented yet");
+    Ok(())
+}
+
+async fn manual_add_liquidity_sol(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+) -> Result<()> {
+    // TODO: Implement manual add liquidity with SOL
+    println!("manual_add_liquidity_sol - Not implemented yet");
+    Ok(())
+}
+
+async fn manual_remove_liquidity_sol(
+    mut sdk: sdk_on_chain::DarklakeSDK,
+    user_keypair: Keypair,
+) -> Result<()> {
+    // TODO: Implement manual remove liquidity with SOL
+    println!("manual_remove_liquidity_sol - Not implemented yet");
+    Ok(())
+}
+
+async fn remove_liquidity_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
+    // TODO: Implement remove liquidity with SOL
+    println!("remove_liquidity_sol - Not implemented yet");
+    Ok(())
+}
+
+async fn add_liquidity_sol(mut sdk: sdk_on_chain::DarklakeSDK) -> Result<()> {
+    // TODO: Implement add liquidity with SOL
+    println!("add_liquidity_sol - Not implemented yet");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -394,9 +591,44 @@ async fn main() -> Result<()> {
             println!("Running manual_remove_liquidity()...");
             manual_remove_liquidity(sdk, load_wallet_key()?).await
         }
+      
         "remove_liquidity" => {
             println!("Running remove_liquidity()...");
             remove_liquidity(sdk).await
+        }
+       
+        // SOL
+        "manual_swap_from_sol" => {
+            println!("Running manual_swap_from_sol()...");
+            manual_swap_from_sol(sdk, load_wallet_key()?).await
+        }
+        "manual_swap_to_sol" => {
+            println!("Running manual_swap_to_sol()...");
+            manual_swap_to_sol(sdk, load_wallet_key()?).await
+        }
+        "swap_from_sol" => {
+            println!("Running swap_from_sol()...");
+            swap_from_sol(sdk).await
+        }
+        "swap_to_sol" => {
+            println!("Running swap_to_sol()...");
+            swap_to_sol(sdk).await
+        }
+        "manual_add_liquidity_sol" => {
+            println!("Running manual_add_liquidity_sol()...");
+            manual_add_liquidity_sol(sdk, load_wallet_key()?).await
+        }
+        "manual_remove_liquidity_sol" => {
+            println!("Running manual_remove_liquidity_sol()...");
+            manual_remove_liquidity_sol(sdk, load_wallet_key()?).await
+        }
+        "remove_liquidity_sol" => {
+            println!("Running remove_liquidity_sol()...");
+            remove_liquidity_sol(sdk).await
+        }
+        "add_liquidity_sol" => {
+            println!("Running add_liquidity_sol()...");
+            add_liquidity_sol(sdk).await
         }
         _ => {
             println!("Unknown function: {}", args[1]);
