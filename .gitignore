@@ -1,3 +1,4 @@
 target
 .DS_Store
-key.json
+user_key.json
+settler_key.json
