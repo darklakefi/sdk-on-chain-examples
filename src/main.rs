@@ -1210,7 +1210,7 @@ async fn add_liquidity_sol(
 }
 
 async fn manual_init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
-    println!("Darklake DEX SDK - Init Pool");
+    println!("Darklake DEX SDK - Manual Init Pool");
     println!("=====================================");
 
     let rpc_client =
