@@ -7,7 +7,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-sdk-on-chain = { git = "https://github.com/darklakefi/sdk-on-chain.git", branch = "main", version = "0.1.6" }
+sdk-on-chain = { git = "https://github.com/darklakefi/sdk-on-chain.git", branch = "feature/dar-716-sdk-release-prep", version = "0.1.7" }
 solana-sdk = "2.2.0"
 solana-rpc-client = "2.2.0"
 solana-rpc-client-api = "2.2.0"
@@ -18,7 +18,7 @@ base64 = "0.21"
 serde_json = "1.0"
 spl-token = { version = "8.0.0", features = ["no-entrypoint"] }
 spl-associated-token-account = { version = "7.0.0", features = ["no-entrypoint"] }
-
+solana-system-interface = "1.0.0"
 
 [dev-dependencies.cargo-husky]
 version = "1.5.0"

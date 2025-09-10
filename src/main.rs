@@ -70,10 +70,10 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
-        in_amount: 1_000, // 1 token (assuming 6 decimals)
+        in_amount: 1_000,
         swap_mode: SwapMode::ExactIn,
-        min_out, // 0.95 tokens out (5% slippage tolerance)
-        salt,    // Random salt for order uniqueness
+        min_out,
+        salt, // Random salt for order uniqueness
     };
 
     let swap_ix = sdk.swap_ix(swap_params).await?;
@@ -103,19 +103,22 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
 
     // Retry get_order up to 3 times with 3 second delays
     let mut order = None;
-    for attempt in 1..=3 {
-        match sdk.get_order(user_keypair.pubkey()).await {
+    for attempt in 1..=5 {
+        match sdk
+            .get_order(user_keypair.pubkey(), CommitmentLevel::Processed)
+            .await
+        {
             Ok(result) => {
                 order = Some(result);
                 break;
             }
             Err(e) => {
-                if attempt < 3 {
+                if attempt < 5 {
                     println!(
-                        "get_order failed (attempt {}): {}. Retrying in 3 seconds...",
+                        "get_order failed (attempt {}): {}. Retrying in 5 seconds...",
                         attempt, e
                     );
-                    sleep(Duration::from_secs(3)).await;
+                    sleep(Duration::from_secs(5)).await;
                 } else {
                     return Err(e.into());
                 }
@@ -188,7 +191,7 @@ async fn manual_swap_different_settler(
     user_keypair: Keypair,
     settler: Keypair,
 ) -> Result<()> {
-    println!("Darklake DEX SDK - Manual Swap");
+    println!("Darklake DEX SDK - Manual Swap Different Settler");
     println!("===============================");
 
     let rpc_client =
@@ -212,10 +215,10 @@ async fn manual_swap_different_settler(
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
-        in_amount: 1_000, // 1 token (assuming 6 decimals)
+        in_amount: 1_000,
         swap_mode: SwapMode::ExactIn,
-        min_out, // 0.95 tokens out (5% slippage tolerance)
-        salt,    // Random salt for order uniqueness
+        min_out,
+        salt, // Random salt for order uniqueness
     };
 
     let swap_ix = sdk.swap_ix(swap_params).await?;
@@ -239,25 +242,28 @@ async fn manual_swap_different_settler(
     let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
         &swap_transaction,
         CommitmentConfig {
-            commitment: CommitmentLevel::Finalized,
+            commitment: CommitmentLevel::Processed,
         },
     )?;
 
     // Retry get_order up to 3 times with 3 second delays
     let mut order = None;
-    for attempt in 1..=3 {
-        match sdk.get_order(user_keypair.pubkey()).await {
+    for attempt in 1..=5 {
+        match sdk
+            .get_order(user_keypair.pubkey(), CommitmentLevel::Processed)
+            .await
+        {
             Ok(result) => {
                 order = Some(result);
                 break;
             }
             Err(e) => {
-                if attempt < 3 {
+                if attempt < 5 {
                     println!(
-                        "get_order failed (attempt {}): {}. Retrying in 3 seconds...",
+                        "get_order failed (attempt {}): {}. Retrying in 5 seconds...",
                         attempt, e
                     );
-                    sleep(Duration::from_secs(3)).await;
+                    sleep(Duration::from_secs(5)).await;
                 } else {
                     return Err(e.into());
                 }
@@ -265,6 +271,7 @@ async fn manual_swap_different_settler(
         }
     }
     let order = order.unwrap();
+    println!("Order trader: {:?}", order.trader);
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -679,19 +686,22 @@ async fn manual_swap_from_sol(
 
     // Retry get_order up to 3 times with 3 second delays
     let mut order = None;
-    for attempt in 1..=3 {
-        match sdk.get_order(user_keypair.pubkey()).await {
+    for attempt in 1..=5 {
+        match sdk
+            .get_order(user_keypair.pubkey(), CommitmentLevel::Processed)
+            .await
+        {
             Ok(result) => {
                 order = Some(result);
                 break;
             }
             Err(e) => {
-                if attempt < 3 {
+                if attempt < 5 {
                     println!(
-                        "get_order failed (attempt {}): {}. Retrying in 3 seconds...",
+                        "get_order failed (attempt {}): {}. Retrying in 5 seconds...",
                         attempt, e
                     );
-                    sleep(Duration::from_secs(3)).await;
+                    sleep(Duration::from_secs(5)).await;
                 } else {
                     return Err(e.into());
                 }
@@ -809,19 +819,22 @@ async fn manual_swap_to_sol(
 
     // Retry get_order up to 3 times with 3 second delays
     let mut order = None;
-    for attempt in 1..=3 {
-        match sdk.get_order(user_keypair.pubkey()).await {
+    for attempt in 1..=5 {
+        match sdk
+            .get_order(user_keypair.pubkey(), CommitmentLevel::Processed)
+            .await
+        {
             Ok(result) => {
                 order = Some(result);
                 break;
             }
             Err(e) => {
-                if attempt < 3 {
+                if attempt < 5 {
                     println!(
-                        "get_order failed (attempt {}): {}. Retrying in 3 seconds...",
+                        "get_order failed (attempt {}): {}. Retrying in 5 seconds...",
                         attempt, e
                     );
-                    sleep(Duration::from_secs(3)).await;
+                    sleep(Duration::from_secs(5)).await;
                 } else {
                     return Err(e.into());
                 }
@@ -1196,10 +1209,12 @@ async fn main() -> Result<()> {
         println!("Available functions:");
         println!("  manual_swap  - swaps using swap_ix");
         println!("  swap  - swaps using swap_tx");
+
         println!("  manual_add_liquidity  - add liquidity using add_liquidity_ix");
         println!("  add_liquidity  - add liquidity using add_liquidity_tx");
         println!("  manual_remove_liquidity  - remove liquidity using remove_liquidity_ix");
         println!("  remove_liquidity  - remove liquidity using remove_liquidity_tx");
+
         println!("  manual_swap_different_settler  - swaps using swap_ix with a different settler");
         println!("  swap_different_settler  - swaps using swap_tx with a different settler");
 
@@ -1215,7 +1230,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let sdk = sdk_on_chain::DarklakeSDK::new(DEVNET_ENDPOINT);
+    let sdk = sdk_on_chain::DarklakeSDK::new(DEVNET_ENDPOINT, CommitmentLevel::Processed);
 
     let user_key_filename = "user_key.json";
     let settler_key_filename = "settler_key.json";

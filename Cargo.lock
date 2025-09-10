@@ -5045,8 +5045,8 @@ dependencies = [
 
 [[package]]
 name = "sdk-on-chain"
-version = "0.1.6"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=fix%2Fdar-714-bad-settler-format-unused-code#05853b73c1496662fca0391ffebf4ecdf1f463f0"
+version = "0.1.7"
+source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=feature%2Fdar-716-sdk-release-prep#82d89ac8b3a556574d22d3616274dc3540b40602"
 dependencies = [
  "anchor-client",
  "anchor-lang",
@@ -5097,6 +5097,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+ "solana-system-interface 1.0.0",
  "solana-transaction-status",
  "spl-associated-token-account 7.0.0",
  "spl-token 8.0.0",

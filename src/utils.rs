@@ -1,5 +1,6 @@
 use anyhow::Result;
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey, system_instruction};
+use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
+use solana_system_interface::instruction::transfer;
 use spl_associated_token_account::get_associated_token_address;
 use spl_token::{
     instruction::{close_account, sync_native},
@@ -29,7 +30,7 @@ pub fn get_wrap_sol_to_wsol_instructions(
         );
 
     // 3. Transfer SOL to the ATA
-    let transfer_sol_ix = system_instruction::transfer(&payer, &wsol_ata, amount_in_lamports);
+    let transfer_sol_ix = transfer(&payer, &wsol_ata, amount_in_lamports);
 
     // 4. Sync the ATA to mark it as wrapped
     let sync_native_ix = sync_native(&token_program_id, &wsol_ata)?;
