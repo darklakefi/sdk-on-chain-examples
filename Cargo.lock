@@ -5045,8 +5045,8 @@ dependencies = [
 
 [[package]]
 name = "sdk-on-chain"
-version = "0.1.7"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=main#54acae3ab57d65d827627b004d54385cee0fdf26"
+version = "0.1.8"
+source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=feature%2Fdar-718-pool-init#e162a66fb5ccb33a0ef21691e0176dc3abb9619f"
 dependencies = [
  "anchor-client",
  "anchor-lang",

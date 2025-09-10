@@ -28,6 +28,9 @@ methods=(
     "manual_remove_liquidity_sol"
     "remove_liquidity_sol"
     "add_liquidity_sol"
+    "manual_init_pool"
+    "init_pool"
+    "init_pool_sol"
 )
 
 # Run each method
