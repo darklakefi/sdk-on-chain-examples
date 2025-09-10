@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use sdk_on_chain::{
-    amm::FinalizeParams, AddLiquidityParams, RemoveLiquidityParams, SwapMode, SwapParams,
+    AddLiquidityParams, FinalizeParams, RemoveLiquidityParams, SwapMode, SwapParams,
 };
 use serde_json;
 use solana_rpc_client::rpc_client::RpcClient;
