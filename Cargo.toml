@@ -7,7 +7,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-sdk-on-chain = { git = "https://github.com/darklakefi/sdk-on-chain.git", branch = "feature/dar-718-pool-init", version = "0.1.8" }
+sdk-on-chain = { git = "https://github.com/darklakefi/sdk-on-chain.git", branch = "main", version = "0.1.8" }
 solana-sdk = "2.2.0"
 solana-rpc-client = "2.2.0"
 solana-rpc-client-api = "2.2.0"
