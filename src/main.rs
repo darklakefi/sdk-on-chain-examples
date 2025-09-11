@@ -1,11 +1,14 @@
 use anyhow::{bail, Context, Result};
 use sdk_on_chain::{
-    AddLiquidityParams, FinalizeParams, RemoveLiquidityParams, SwapMode, SwapParams,
+    AddLiquidityParams, FinalizeParams, InitializePoolParams, RemoveLiquidityParams, SwapMode,
+    SwapParams,
 };
 use serde_json;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
+    compute_budget::ComputeBudgetInstruction,
+    instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -14,6 +17,8 @@ use spl_token::native_mint;
 use std::fs;
 use std::str::FromStr;
 use tokio::time::{sleep, Duration};
+
+use crate::utils::{create_new_tokens, create_token_mint, mint_tokens_to_user};
 
 pub mod utils;
 
@@ -76,7 +81,7 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
         salt, // Random salt for order uniqueness
     };
 
-    let swap_ix = sdk.swap_ix(swap_params).await?;
+    let swap_ix = sdk.swap_ix(swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -158,14 +163,16 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
         })?,
     };
 
-    let finalize_ix = sdk.finalize_ix(finalize_params).await?;
+    let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
+
+    let finalize_ix = sdk.finalize_ix(finalize_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
     let finalize_transaction = Transaction::new_signed_with_payer(
-        &[finalize_ix],
+        &[compute_budget_ix, finalize_ix],
         Some(&user_keypair.pubkey()),
         &[&user_keypair],
         recent_blockhash,
@@ -221,7 +228,7 @@ async fn manual_swap_different_settler(
         salt, // Random salt for order uniqueness
     };
 
-    let swap_ix = sdk.swap_ix(swap_params).await?;
+    let swap_ix = sdk.swap_ix(swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -290,14 +297,16 @@ async fn manual_swap_different_settler(
         })?,
     };
 
-    let finalize_ix = sdk.finalize_ix(finalize_params).await?;
+    let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
+
+    let finalize_ix = sdk.finalize_ix(finalize_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
     let finalize_transaction = Transaction::new_signed_with_payer(
-        &[finalize_ix],
+        &[compute_budget_ix, finalize_ix],
         Some(&settler.pubkey()),
         &[&settler],
         recent_blockhash,
@@ -460,7 +469,7 @@ async fn manual_add_liquidity(
         max_amount_y: 1_000,
     };
 
-    let add_liquidity_ix = sdk.add_liquidity_ix(add_liquidity_params).await?;
+    let add_liquidity_ix = sdk.add_liquidity_ix(add_liquidity_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -553,7 +562,7 @@ async fn manual_remove_liquidity(
         min_amount_y: 1,
     };
 
-    let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params).await?;
+    let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -655,7 +664,7 @@ async fn manual_swap_from_sol(
         salt,
     };
 
-    let swap_ix = sdk.swap_ix(swap_params).await?;
+    let swap_ix = sdk.swap_ix(swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -727,7 +736,7 @@ async fn manual_swap_from_sol(
         })?,
     };
 
-    let finalize_ix = sdk.finalize_ix(finalize_params).await?;
+    let finalize_ix = sdk.finalize_ix(finalize_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -792,7 +801,7 @@ async fn manual_swap_to_sol(
         salt,
     };
 
-    let swap_ix = sdk.swap_ix(swap_params).await?;
+    let swap_ix = sdk.swap_ix(swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -860,7 +869,7 @@ async fn manual_swap_to_sol(
         })?,
     };
 
-    let finalize_ix = sdk.finalize_ix(finalize_params).await?;
+    let finalize_ix = sdk.finalize_ix(finalize_params)?;
 
     // Alternatively you can manually unwrap the WSOL by closing the WSOL ATA
 
@@ -1028,7 +1037,7 @@ async fn manual_add_liquidity_sol(
         max_amount_y: token_amount, // DuX token amount
     };
 
-    let add_liquidity_ix = sdk.add_liquidity_ix(add_liquidity_params).await?;
+    let add_liquidity_ix = sdk.add_liquidity_ix(add_liquidity_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -1096,7 +1105,7 @@ async fn manual_remove_liquidity_sol(
         min_amount_y: 1, // Minimum DuX token amount to receive
     };
 
-    let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params).await?;
+    let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params)?;
 
     // Generate WSOL unwrapping instructions to close the WSOL ATA
     println!("Generating WSOL unwrapping instructions...");
@@ -1200,6 +1209,155 @@ async fn add_liquidity_sol(
     Ok(())
 }
 
+async fn manual_init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+    println!("Darklake DEX SDK - Manual Init Pool");
+    println!("=====================================");
+
+    let rpc_client =
+        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+
+    // Create new token mints for X and Y
+    println!("Creating new token mints...");
+    let (token_mint_x, token_mint_y) =
+        create_new_tokens(&rpc_client, &user_keypair, 1_000_000_000).await?;
+
+    println!("Token X Mint: {}", token_mint_x);
+    println!("Token Y Mint: {}", token_mint_y);
+
+    let (ordered_token_mint_x, ordered_token_mint_y) = if token_mint_x < token_mint_y {
+        (token_mint_x, token_mint_y)
+    } else {
+        (token_mint_y, token_mint_x)
+    };
+
+    let initialize_pool_params = InitializePoolParams {
+        user: user_keypair.pubkey(),
+        token_x: ordered_token_mint_x,
+        token_x_program: spl_token::ID,
+        token_y: ordered_token_mint_y,
+        token_y_program: spl_token::ID,
+        amount_x: 1_000,
+        amount_y: 1_001,
+    };
+
+    // Initialize pool with the new tokens
+    println!("Initializing pool...");
+    let initialize_pool_ix = sdk.initialize_pool_ix(initialize_pool_params)?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
+
+    let all_instructions = vec![compute_budget_ix, initialize_pool_ix];
+
+    let initialize_pool_transaction = Transaction::new_signed_with_payer(
+        &all_instructions,
+        Some(&user_keypair.pubkey()),
+        &[&user_keypair],
+        recent_blockhash,
+    );
+
+    let _initialize_pool_signature =
+        rpc_client.send_and_confirm_transaction_with_spinner(&initialize_pool_transaction)?;
+
+    println!(
+        "Initialize Pool transaction signature: {}",
+        initialize_pool_transaction.signatures[0]
+    );
+
+    Ok(())
+}
+
+async fn init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+    println!("Darklake DEX SDK - Init Pool");
+    println!("=====================================");
+
+    let rpc_client =
+        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+
+    // Create new token mints for X and Y
+    println!("Creating new token mints...");
+    let (token_mint_x, token_mint_y) =
+        create_new_tokens(&rpc_client, &user_keypair, 1_000_000_000).await?;
+
+    println!("Token X Mint: {}", token_mint_x);
+    println!("Token Y Mint: {}", token_mint_y);
+
+    // Initialize pool with the new tokens
+    println!("Initializing pool...");
+    let mut initialize_pool_tx = sdk
+        .initialize_pool_tx(
+            token_mint_x,
+            token_mint_y,
+            1_000,
+            1_001,
+            user_keypair.pubkey(),
+        )
+        .await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    initialize_pool_tx.sign(&[&user_keypair], recent_blockhash);
+
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&initialize_pool_tx)?;
+    println!("Initialize Pool: {:?}", res);
+
+    Ok(())
+}
+
+async fn init_pool_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+    println!("Darklake DEX SDK - Init Pool SOL");
+    println!("=====================================");
+
+    let rpc_client =
+        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+
+    let mint_amount = 1_000_000_000;
+
+    // Create new token mints for X
+    println!("Creating new token mint...");
+    let token_mint_x_keypair = Keypair::new();
+
+    println!("Creating Token X Mint...");
+    let token_mint_x = create_token_mint(&rpc_client, &user_keypair, &token_mint_x_keypair).await?;
+
+    println!("Token X Mint: {}", token_mint_x);
+
+    println!("Minting Token X to user...");
+    mint_tokens_to_user(&rpc_client, &user_keypair, &token_mint_x, mint_amount).await?;
+
+    println!("Token X Mint: {}", token_mint_x);
+
+    let token_mint_y = Pubkey::from_str(SOL_MINT).unwrap();
+
+    // Initialize pool with the new tokens
+    println!("Initializing pool...");
+    let mut initialize_pool_tx = sdk
+        .initialize_pool_tx(
+            token_mint_x,
+            token_mint_y,
+            1_000,
+            1_001,
+            user_keypair.pubkey(),
+        )
+        .await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    initialize_pool_tx.sign(&[&user_keypair], recent_blockhash);
+
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&initialize_pool_tx)?;
+    println!("Initialize Pool: {:?}", res);
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -1227,10 +1385,18 @@ async fn main() -> Result<()> {
         println!("  manual_swap_to_sol  - swaps to SOL using swap_ix");
         println!("  swap_from_sol  - swaps from SOL using swap_tx");
         println!("  swap_to_sol  - swaps to SOL using swap_tx");
+
+        println!("  init_pool  - creates new tokens X and Y and initializes a pool");
+        println!("  init_pool_sol  - creates new token X and SOL and initializes a pool");
+        println!(
+            "  manual_init_pool  - manually creates new tokens X and Y and initializes a pool"
+        );
         return Ok(());
     }
 
-    let sdk = sdk_on_chain::DarklakeSDK::new(DEVNET_ENDPOINT, CommitmentLevel::Processed);
+    let is_devnet = true;
+    let sdk =
+        sdk_on_chain::DarklakeSDK::new(DEVNET_ENDPOINT, CommitmentLevel::Processed, is_devnet);
 
     let user_key_filename = "user_key.json";
     let settler_key_filename = "settler_key.json";
@@ -1312,6 +1478,18 @@ async fn main() -> Result<()> {
         "add_liquidity_sol" => {
             println!("Running add_liquidity_sol()...");
             add_liquidity_sol(sdk, load_keypair(user_key_filename)?).await
+        }
+        "manual_init_pool" => {
+            println!("Running manual_init_pool()...");
+            manual_init_pool(sdk, load_keypair(user_key_filename)?).await
+        }
+        "init_pool" => {
+            println!("Running init_pool()...");
+            init_pool(sdk, load_keypair(user_key_filename)?).await
+        }
+        "init_pool_sol" => {
+            println!("Running init_pool_sol()...");
+            init_pool_sol(sdk, load_keypair(user_key_filename)?).await
         }
         _ => {
             println!("Unknown function: {}", args[1]);

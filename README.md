@@ -33,6 +33,11 @@ Both key files must exist in the project root directory.
 - `remove_liquidity_sol` - remove liquidity (one of the tokens is SOL) using remove_liquidity_tx
 - `add_liquidity_sol` - add liquidity (one of the tokens is SOL) using add_liquidity_tx
 
+### Pool Initialization
+- `manual_init_pool` - creates new tokens X and Y and initializes a pool using initialize_pool_ix
+- `init_pool` - creates new tokens X and Y and initializes a pool using initialize_pool_tx
+- `init_pool_sol` - creates new token X and initializes a pool with a SOL pair using initialize_pool_tx
+
 ## Usage
 
 ```bash

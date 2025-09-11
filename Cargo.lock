@@ -5045,8 +5045,8 @@ dependencies = [
 
 [[package]]
 name = "sdk-on-chain"
-version = "0.1.7"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=main#54acae3ab57d65d827627b004d54385cee0fdf26"
+version = "0.1.8"
+source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=main#d0d69415f4747fb5c6334502d448d21cd11917a9"
 dependencies = [
  "anchor-client",
  "anchor-lang",
