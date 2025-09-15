@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    address_lookup_table::state::AddressLookupTable, instruction::Instruction,
+    message::AddressLookupTableAccount, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
 use solana_system_interface::instruction::{create_account, transfer};
@@ -193,4 +194,23 @@ pub async fn create_new_tokens(
 
     println!("Successfully created and minted both tokens!");
     Ok((token_mint_x, token_mint_y))
+}
+
+pub async fn get_address_lookup_table(
+    rpc_client: &RpcClient,
+    lookup_table_pubkey: Pubkey,
+) -> Result<AddressLookupTableAccount> {
+    // Fetch the address lookup table
+    let alt_account = rpc_client
+        .get_account(&lookup_table_pubkey)
+        .context("Failed to get address lookup table")?;
+
+    let table = AddressLookupTable::deserialize(&alt_account.data)?;
+
+    let address_lookup_table = AddressLookupTableAccount {
+        key: lookup_table_pubkey,
+        addresses: table.addresses.to_vec(),
+    };
+
+    Ok(address_lookup_table)
 }

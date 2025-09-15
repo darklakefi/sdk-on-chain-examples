@@ -1,24 +1,28 @@
 use anyhow::{bail, Context, Result};
-use sdk_on_chain::{
-    AddLiquidityParams, FinalizeParams, InitializePoolParams, RemoveLiquidityParams, SwapMode,
-    SwapParams,
+use darklake_sdk_on_chain::{
+    AddLiquidityParamsIx, DarklakeSDK, FinalizeParamsIx, InitializePoolParamsIx,
+    RemoveLiquidityParamsIx, SwapMode, SwapParamsIx, DEVNET_LOOKUP,
 };
+
 use serde_json;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
+    message::{v0, VersionedMessage},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    transaction::Transaction,
+    transaction::VersionedTransaction,
 };
 use spl_token::native_mint;
 use std::fs;
 use std::str::FromStr;
 use tokio::time::{sleep, Duration};
 
-use crate::utils::{create_new_tokens, create_token_mint, mint_tokens_to_user};
+use crate::utils::{
+    create_new_tokens, create_token_mint, get_address_lookup_table, mint_tokens_to_user,
+};
 
 pub mod utils;
 
@@ -28,6 +32,9 @@ const DEVNET_ENDPOINT: &str = "https://api.devnet.solana.com";
 const TOKEN_MINT_X: &str = "DdLxrGFs2sKYbbqVk76eVx9268ASUdTMAhrsqphqDuX";
 const TOKEN_MINT_Y: &str = "HXsKnhXPtGr2mq4uTpxbxyy7ZydYWJwx4zMuYPEDukY"; // Replace with actual token mint
 const SOL_MINT: &str = "So11111111111111111111111111111111111111111";
+
+const LABEL: &str = "test-label"; // up to 10 characters
+const REF_CODE: &str = "test-ref"; // up to 21 characters
 
 /// Load wallet keypair from key file
 fn load_keypair(key_filename: &str) -> Result<Keypair> {
@@ -50,7 +57,7 @@ fn load_keypair(key_filename: &str) -> Result<Keypair> {
     Ok(keypair)
 }
 
-async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn manual_swap(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Swap");
     println!("===============================");
 
@@ -71,7 +78,7 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
     let salt = [1, 2, 3, 4, 5, 6, 7, 8];
     let min_out = 1;
 
-    let swap_params = SwapParams {
+    let swap_params = SwapParamsIx {
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
@@ -87,20 +94,26 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let swap_transaction = Transaction::new_signed_with_payer(
-        &[swap_ix],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
-        recent_blockhash,
-    );
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
 
-    println!(
-        "Swap transaction signature: {}",
-        swap_transaction.signatures[0]
-    );
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
+        &[swap_ix],
+        &[address_lookup_table.clone()],
+        recent_blockhash,
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
+
+    println!("Swap transaction signature: {}", transaction.signatures[0]);
 
     let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &swap_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Finalized,
         },
@@ -149,7 +162,7 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
     //     sleep(Duration::from_secs(wait_seconds)).await;
     // }
 
-    let finalize_params = FinalizeParams {
+    let finalize_params = FinalizeParamsIx {
         settle_signer: user_keypair.pubkey(),
         order_owner: user_keypair.pubkey(),
         unwrap_wsol: false,      // Set to true if output is wrapped SOL
@@ -171,15 +184,22 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let finalize_transaction = Transaction::new_signed_with_payer(
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &[compute_budget_ix, finalize_ix],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     let _finalize_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &finalize_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Processed,
         },
@@ -187,14 +207,14 @@ async fn manual_swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
 
     println!(
         "Finalize transaction signature: {}",
-        finalize_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
 async fn manual_swap_different_settler(
-    mut sdk: sdk_on_chain::DarklakeSDK,
+    mut sdk: DarklakeSDK,
     user_keypair: Keypair,
     settler: Keypair,
 ) -> Result<()> {
@@ -218,7 +238,7 @@ async fn manual_swap_different_settler(
     let salt = [1, 2, 3, 4, 5, 6, 7, 8];
     let min_out = 1;
 
-    let swap_params = SwapParams {
+    let swap_params = SwapParamsIx {
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
@@ -234,20 +254,26 @@ async fn manual_swap_different_settler(
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let swap_transaction = Transaction::new_signed_with_payer(
-        &[swap_ix],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
-        recent_blockhash,
-    );
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
 
-    println!(
-        "Swap transaction signature: {}",
-        swap_transaction.signatures[0]
-    );
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
+        &[swap_ix],
+        &[address_lookup_table.clone()],
+        recent_blockhash,
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
+
+    println!("Swap transaction signature: {}", transaction.signatures[0]);
 
     let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &swap_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Processed,
         },
@@ -283,7 +309,7 @@ async fn manual_swap_different_settler(
     println!("Updating accounts...");
     sdk.update_accounts().await?;
 
-    let finalize_params = FinalizeParams {
+    let finalize_params = FinalizeParamsIx {
         settle_signer: settler.pubkey(),
         order_owner: user_keypair.pubkey(),
         unwrap_wsol: false,      // Set to true if output is wrapped SOL
@@ -305,15 +331,22 @@ async fn manual_swap_different_settler(
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let finalize_transaction = Transaction::new_signed_with_payer(
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &[compute_budget_ix, finalize_ix],
-        Some(&settler.pubkey()),
-        &[&settler],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![settler.sign_message(&transaction.message.serialize())];
 
     let _finalize_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &finalize_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Processed,
         },
@@ -321,13 +354,13 @@ async fn manual_swap_different_settler(
 
     println!(
         "Finalize transaction signature: {}",
-        finalize_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn swap(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Swap");
     println!("========================");
 
@@ -345,42 +378,36 @@ async fn swap(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Resu
     let unwrap_wsol = token_mint_y == Pubkey::from_str(SOL_MINT).unwrap();
 
     // Swap tx
-    let (mut swap_tx_, order_key, min_out, salt) = sdk
+    let (swap_tx, order_key, min_out, salt) = sdk
         .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
         .await?;
 
+    println!("Swap tx: {:?}", swap_tx);
     let rpc_client =
-        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
+        RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::processed());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
-
-    swap_tx_.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&swap_tx_)?;
+    let tx = VersionedTransaction::try_new(swap_tx.message, &[&user_keypair])?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Swap: {:?}", res);
 
     // last pubkey is the settler if not provided the tx will assume it's the same as the order owner
-    let mut finalize_tx = sdk
+    let finalize_tx: solana_sdk::transaction::VersionedTransaction = sdk
         .finalize_tx(order_key, unwrap_wsol, min_out, salt, None)
         .await?;
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    println!("Finalize tx: {:?}", finalize_tx);
 
-    finalize_tx.sign(&[&user_keypair], recent_blockhash);
+    let tx = VersionedTransaction::try_new(finalize_tx.message, &[&user_keypair])?;
 
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&finalize_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
     println!("Finalize: {:?}", res);
 
     Ok(())
 }
 
 async fn swap_different_settler(
-    mut sdk: sdk_on_chain::DarklakeSDK,
+    mut sdk: DarklakeSDK,
     user_keypair: Keypair,
     settler: Keypair,
 ) -> Result<()> {
@@ -401,25 +428,21 @@ async fn swap_different_settler(
     let unwrap_wsol = token_mint_y == Pubkey::from_str(SOL_MINT).unwrap();
 
     // Swap tx
-    let (mut swap_tx_, order_key, min_out, salt) = sdk
+    let (swap_tx_, order_key, min_out, salt) = sdk
         .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
         .await?;
 
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(swap_tx_.message, &[&user_keypair])?;
 
-    swap_tx_.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&swap_tx_)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Swap: {:?}", res);
 
     // last pubkey is the settler if not provided the tx will assume it's the same as the order owner
-    let mut finalize_tx = sdk
+    let finalize_tx = sdk
         .finalize_tx(
             order_key,
             unwrap_wsol,
@@ -429,22 +452,15 @@ async fn swap_different_settler(
         )
         .await?;
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(finalize_tx.message, &[&settler])?;
 
-    finalize_tx.sign(&[&settler], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&finalize_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
     println!("Finalize: {:?}", res);
 
     Ok(())
 }
 
-async fn manual_add_liquidity(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn manual_add_liquidity(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Add Liquidity");
     println!("========================================");
 
@@ -462,7 +478,7 @@ async fn manual_add_liquidity(
     println!("Updating accounts...");
     sdk.update_accounts().await?;
 
-    let add_liquidity_params = AddLiquidityParams {
+    let add_liquidity_params = AddLiquidityParamsIx {
         user: user_keypair.pubkey(),
         amount_lp: 20,
         max_amount_x: 1_000,
@@ -475,16 +491,25 @@ async fn manual_add_liquidity(
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let add_liquidity_transaction = Transaction::new_signed_with_payer(
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &[add_liquidity_ix],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     let _add_liquidity_signature = rpc_client
         .send_and_confirm_transaction_with_spinner_and_commitment(
-            &add_liquidity_transaction,
+            &transaction,
             CommitmentConfig {
                 commitment: CommitmentLevel::Finalized,
             },
@@ -492,13 +517,13 @@ async fn manual_add_liquidity(
 
     println!(
         "Add Liquidity transaction signature: {}",
-        add_liquidity_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn add_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn add_liquidity(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Add Liquidity");
     println!("=================================");
 
@@ -508,7 +533,7 @@ async fn add_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
     println!("Token X Mint: {}", token_mint_x);
     println!("Token Y Mint: {}", token_mint_y);
 
-    let mut add_liquidity_tx = sdk
+    let add_liquidity_tx = sdk
         .add_liquidity_tx(
             token_mint_x,
             token_mint_y,
@@ -522,22 +547,15 @@ async fn add_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(add_liquidity_tx.message, &[&user_keypair])?;
 
-    add_liquidity_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&add_liquidity_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
     println!("Add Liquidity: {:?}", res);
 
     Ok(())
 }
 
-async fn manual_remove_liquidity(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn manual_remove_liquidity(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Remove Liquidity");
     println!("===========================================");
 
@@ -555,7 +573,7 @@ async fn manual_remove_liquidity(
     println!("Updating accounts...");
     sdk.update_accounts().await?;
 
-    let remove_liquidity_params = RemoveLiquidityParams {
+    let remove_liquidity_params = RemoveLiquidityParamsIx {
         user: user_keypair.pubkey(),
         amount_lp: 20,
         min_amount_x: 1,
@@ -568,16 +586,25 @@ async fn manual_remove_liquidity(
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let remove_liquidity_transaction = Transaction::new_signed_with_payer(
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &[remove_liquidity_ix],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     let _remove_liquidity_signature = rpc_client
         .send_and_confirm_transaction_with_spinner_and_commitment(
-            &remove_liquidity_transaction,
+            &transaction,
             CommitmentConfig {
                 commitment: CommitmentLevel::Finalized,
             },
@@ -585,13 +612,13 @@ async fn manual_remove_liquidity(
 
     println!(
         "Remove Liquidity transaction signature: {}",
-        remove_liquidity_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn remove_liquidity(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Remove Liquidity");
     println!("====================================");
 
@@ -601,20 +628,16 @@ async fn remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keyp
     println!("Token X Mint: {}", token_mint_x);
     println!("Token Y Mint: {}", token_mint_y);
 
-    let mut remove_liquidity_tx = sdk
+    let remove_liquidity_tx = sdk
         .remove_liquidity_tx(token_mint_x, token_mint_y, 1, 1, 20, user_keypair.pubkey())
         .await?;
 
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(remove_liquidity_tx.message, &[&user_keypair])?;
 
-    remove_liquidity_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&remove_liquidity_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Remove Liquidity: {:?}", res);
 
@@ -622,10 +645,7 @@ async fn remove_liquidity(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keyp
 }
 
 // SOL template functions
-async fn manual_swap_from_sol(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn manual_swap_from_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Swap From SOL");
     println!("=========================================");
 
@@ -654,7 +674,7 @@ async fn manual_swap_from_sol(
     let wrap_instructions =
         utils::get_wrap_sol_to_wsol_instructions(user_keypair.pubkey(), sol_amount)?;
 
-    let swap_params = SwapParams {
+    let swap_params = SwapParamsIx {
         source_mint: token_mint_x,      // WSOL
         destination_mint: token_mint_y, // DuX
         token_transfer_authority: user_keypair.pubkey(),
@@ -674,20 +694,26 @@ async fn manual_swap_from_sol(
     let mut all_instructions = wrap_instructions;
     all_instructions.push(swap_ix);
 
-    let swap_transaction = Transaction::new_signed_with_payer(
-        &all_instructions,
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
-        recent_blockhash,
-    );
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
 
-    println!(
-        "Swap transaction signature: {}",
-        swap_transaction.signatures[0]
-    );
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
+        &all_instructions,
+        &[address_lookup_table],
+        recent_blockhash,
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
+
+    println!("Swap transaction signature: {}", transaction.signatures[0]);
 
     let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &swap_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Finalized,
         },
@@ -722,7 +748,7 @@ async fn manual_swap_from_sol(
     println!("Updating accounts...");
     sdk.update_accounts().await?;
 
-    let finalize_params = FinalizeParams {
+    let finalize_params = FinalizeParamsIx {
         settle_signer: user_keypair.pubkey(),
         order_owner: user_keypair.pubkey(),
         unwrap_wsol: true, // Set to true since we're swapping from WSOL
@@ -742,15 +768,24 @@ async fn manual_swap_from_sol(
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let finalize_transaction = Transaction::new_signed_with_payer(
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &[finalize_ix],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     let _finalize_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &finalize_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Processed,
         },
@@ -758,16 +793,13 @@ async fn manual_swap_from_sol(
 
     println!(
         "Finalize transaction signature: {}",
-        finalize_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn manual_swap_to_sol(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn manual_swap_to_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Swap To SOL");
     println!("======================================");
 
@@ -791,7 +823,7 @@ async fn manual_swap_to_sol(
     let min_out = 1;
     let token_amount = 1_000; // Amount of DuX tokens to swap
 
-    let swap_params = SwapParams {
+    let swap_params = SwapParamsIx {
         source_mint: token_mint_x,      // DuX
         destination_mint: token_mint_y, // WSOL
         token_transfer_authority: user_keypair.pubkey(),
@@ -807,20 +839,26 @@ async fn manual_swap_to_sol(
         .get_latest_blockhash()
         .context("Failed to get recent blockhash")?;
 
-    let swap_transaction = Transaction::new_signed_with_payer(
-        &[swap_ix],
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
-        recent_blockhash,
-    );
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
 
-    println!(
-        "Swap transaction signature: {}",
-        swap_transaction.signatures[0]
-    );
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
+        &[swap_ix],
+        &[address_lookup_table],
+        recent_blockhash,
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
+
+    println!("Swap transaction signature: {}", transaction.signatures[0]);
 
     let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &swap_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Finalized,
         },
@@ -855,7 +893,7 @@ async fn manual_swap_to_sol(
     println!("Updating accounts...");
     sdk.update_accounts().await?;
 
-    let finalize_params = FinalizeParams {
+    let finalize_params = FinalizeParamsIx {
         settle_signer: user_keypair.pubkey(),
         order_owner: user_keypair.pubkey(),
         unwrap_wsol: true, // Set to true since we're swapping to WSOL and want to unwrap it
@@ -880,15 +918,24 @@ async fn manual_swap_to_sol(
     // Combine finalize instruction with unwrap instructions
     let all_instructions = vec![finalize_ix];
 
-    let finalize_transaction = Transaction::new_signed_with_payer(
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &all_instructions,
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     let _finalize_signature = rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(
-        &finalize_transaction,
+        &transaction,
         CommitmentConfig {
             commitment: CommitmentLevel::Processed,
         },
@@ -896,13 +943,13 @@ async fn manual_swap_to_sol(
 
     println!(
         "Finalize transaction signature: {}",
-        finalize_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn swap_from_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Swap From SOL");
     println!("==================================");
 
@@ -917,41 +964,33 @@ async fn swap_from_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
 
     println!("Quote: {:?}", res_quote);
 
-    let (mut swap_tx_, order_key, min_out, salt) = sdk
+    let (swap_tx_, order_key, min_out, salt) = sdk
         .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
         .await?;
 
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(swap_tx_.message, &[&user_keypair])?;
 
-    swap_tx_.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&swap_tx_)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Swap: {:?}", res);
 
-    let mut finalize_tx = sdk
+    let finalize_tx = sdk
         .finalize_tx(order_key, true, min_out, salt, None)
         .await?;
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(finalize_tx.message, &[&user_keypair])?;
 
-    finalize_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&finalize_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Finalize: {:?}", res);
 
     Ok(())
 }
 
-async fn swap_to_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn swap_to_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Swap To SOL");
     println!("===============================");
 
@@ -965,44 +1004,33 @@ async fn swap_to_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) 
 
     println!("Quote: {:?}", res_quote);
 
-    let (mut swap_tx_, order_key, min_out, salt) = sdk
+    let (swap_tx_, order_key, min_out, salt) = sdk
         .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
         .await?;
 
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(swap_tx_.message, &[&user_keypair])?;
 
-    swap_tx_.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&swap_tx_)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Swap: {:?}", res);
 
-    let mut finalize_tx = sdk
+    let finalize_tx = sdk
         .finalize_tx(order_key, true, min_out, salt, None)
         .await?;
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(finalize_tx.message, &[&user_keypair])?;
 
-    finalize_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&finalize_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Finalize: {:?}", res);
 
     Ok(())
 }
 
-async fn manual_add_liquidity_sol(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn manual_add_liquidity_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Add Liquidity SOL");
     println!("=============================================");
 
@@ -1030,7 +1058,7 @@ async fn manual_add_liquidity_sol(
     let wrap_instructions =
         utils::get_wrap_sol_to_wsol_instructions(user_keypair.pubkey(), sol_amount)?;
 
-    let add_liquidity_params = AddLiquidityParams {
+    let add_liquidity_params = AddLiquidityParamsIx {
         user: user_keypair.pubkey(),
         amount_lp: 20,
         max_amount_x: sol_amount,   // SOL amount (will be wrapped to WSOL)
@@ -1047,30 +1075,36 @@ async fn manual_add_liquidity_sol(
     let mut all_instructions = wrap_instructions;
     all_instructions.push(add_liquidity_ix);
 
-    let add_liquidity_transaction = Transaction::new_signed_with_payer(
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &all_instructions,
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     // Optionally you can close the WSOL ATA after adding liquidity as it may contain some WSOL that wasn't used
 
     let _add_liquidity_signature =
-        rpc_client.send_and_confirm_transaction_with_spinner(&add_liquidity_transaction)?;
+        rpc_client.send_and_confirm_transaction_with_spinner(&transaction)?;
 
     println!(
         "Add Liquidity transaction signature: {}",
-        add_liquidity_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn manual_remove_liquidity_sol(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn manual_remove_liquidity_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Remove Liquidity SOL");
     println!("===============================================");
 
@@ -1098,7 +1132,7 @@ async fn manual_remove_liquidity_sol(
             &spl_token::ID,
         );
 
-    let remove_liquidity_params = RemoveLiquidityParams {
+    let remove_liquidity_params = RemoveLiquidityParamsIx {
         user: user_keypair.pubkey(),
         amount_lp: 20,
         min_amount_x: 1, // Minimum SOL amount to receive
@@ -1119,28 +1153,34 @@ async fn manual_remove_liquidity_sol(
     let mut all_instructions = vec![create_wsol_ata_ix, remove_liquidity_ix];
     all_instructions.extend(unwrap_instructions);
 
-    let remove_liquidity_transaction = Transaction::new_signed_with_payer(
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &all_instructions,
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     let _remove_liquidity_signature =
-        rpc_client.send_and_confirm_transaction_with_spinner(&remove_liquidity_transaction)?;
+        rpc_client.send_and_confirm_transaction_with_spinner(&transaction)?;
 
     println!(
         "Remove Liquidity transaction signature: {}",
-        remove_liquidity_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn remove_liquidity_sol(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn remove_liquidity_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Remove Liquidity SOL");
     println!("=========================================");
 
@@ -1150,30 +1190,23 @@ async fn remove_liquidity_sol(
     println!("Token X Mint (SOL): {}", token_mint_x);
     println!("Token Y Mint (DuX): {}", token_mint_y);
 
-    let mut remove_liquidity_tx = sdk
+    let remove_liquidity_tx = sdk
         .remove_liquidity_tx(token_mint_x, token_mint_y, 1, 1, 20, user_keypair.pubkey())
         .await?;
 
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(remove_liquidity_tx.message, &[&user_keypair])?;
 
-    remove_liquidity_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&remove_liquidity_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
 
     println!("Remove Liquidity: {:?}", res);
 
     Ok(())
 }
 
-async fn add_liquidity_sol(
-    mut sdk: sdk_on_chain::DarklakeSDK,
-    user_keypair: Keypair,
-) -> Result<()> {
+async fn add_liquidity_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Add Liquidity SOL");
     println!("=====================================");
 
@@ -1183,7 +1216,7 @@ async fn add_liquidity_sol(
     println!("Token X Mint (SOL): {}", token_mint_x);
     println!("Token Y Mint (DuX): {}", token_mint_y);
 
-    let mut add_liquidity_tx = sdk
+    let add_liquidity_tx = sdk
         .add_liquidity_tx(
             token_mint_x,
             token_mint_y,
@@ -1197,19 +1230,15 @@ async fn add_liquidity_sol(
     let rpc_client =
         RpcClient::new_with_commitment(DEVNET_ENDPOINT.to_string(), CommitmentConfig::finalized());
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(add_liquidity_tx.message, &[&user_keypair])?;
 
-    add_liquidity_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&add_liquidity_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
     println!("Add Liquidity: {:?}", res);
 
     Ok(())
 }
 
-async fn manual_init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn manual_init_pool(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Manual Init Pool");
     println!("=====================================");
 
@@ -1230,7 +1259,7 @@ async fn manual_init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keyp
         (token_mint_y, token_mint_x)
     };
 
-    let initialize_pool_params = InitializePoolParams {
+    let initialize_pool_params = InitializePoolParamsIx {
         user: user_keypair.pubkey(),
         token_x: ordered_token_mint_x,
         token_x_program: spl_token::ID,
@@ -1252,25 +1281,34 @@ async fn manual_init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keyp
 
     let all_instructions = vec![compute_budget_ix, initialize_pool_ix];
 
-    let initialize_pool_transaction = Transaction::new_signed_with_payer(
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
         &all_instructions,
-        Some(&user_keypair.pubkey()),
-        &[&user_keypair],
+        &[address_lookup_table],
         recent_blockhash,
-    );
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
 
     let _initialize_pool_signature =
-        rpc_client.send_and_confirm_transaction_with_spinner(&initialize_pool_transaction)?;
+        rpc_client.send_and_confirm_transaction_with_spinner(&transaction)?;
 
     println!(
         "Initialize Pool transaction signature: {}",
-        initialize_pool_transaction.signatures[0]
+        transaction.signatures[0]
     );
 
     Ok(())
 }
 
-async fn init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn init_pool(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Init Pool");
     println!("=====================================");
 
@@ -1287,7 +1325,7 @@ async fn init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) ->
 
     // Initialize pool with the new tokens
     println!("Initializing pool...");
-    let mut initialize_pool_tx = sdk
+    let initialize_pool_tx = sdk
         .initialize_pool_tx(
             token_mint_x,
             token_mint_y,
@@ -1297,19 +1335,15 @@ async fn init_pool(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) ->
         )
         .await?;
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(initialize_pool_tx.message, &[&user_keypair])?;
 
-    initialize_pool_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&initialize_pool_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
     println!("Initialize Pool: {:?}", res);
 
     Ok(())
 }
 
-async fn init_pool_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair) -> Result<()> {
+async fn init_pool_sol(mut sdk: DarklakeSDK, user_keypair: Keypair) -> Result<()> {
     println!("Darklake DEX SDK - Init Pool SOL");
     println!("=====================================");
 
@@ -1336,7 +1370,7 @@ async fn init_pool_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
 
     // Initialize pool with the new tokens
     println!("Initializing pool...");
-    let mut initialize_pool_tx = sdk
+    let initialize_pool_tx = sdk
         .initialize_pool_tx(
             token_mint_x,
             token_mint_y,
@@ -1346,13 +1380,9 @@ async fn init_pool_sol(mut sdk: sdk_on_chain::DarklakeSDK, user_keypair: Keypair
         )
         .await?;
 
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .context("Failed to get recent blockhash")?;
+    let tx = VersionedTransaction::try_new(initialize_pool_tx.message, &[&user_keypair])?;
 
-    initialize_pool_tx.sign(&[&user_keypair], recent_blockhash);
-
-    let res = rpc_client.send_and_confirm_transaction_with_spinner(&initialize_pool_tx)?;
+    let res = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
     println!("Initialize Pool: {:?}", res);
 
     Ok(())
@@ -1395,8 +1425,13 @@ async fn main() -> Result<()> {
     }
 
     let is_devnet = true;
-    let sdk =
-        sdk_on_chain::DarklakeSDK::new(DEVNET_ENDPOINT, CommitmentLevel::Processed, is_devnet);
+    let sdk = DarklakeSDK::new(
+        DEVNET_ENDPOINT,
+        CommitmentLevel::Processed,
+        is_devnet,
+        Some(LABEL),
+        Some(REF_CODE),
+    )?;
 
     let user_key_filename = "user_key.json";
     let settler_key_filename = "settler_key.json";
