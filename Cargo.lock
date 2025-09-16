@@ -1709,7 +1709,7 @@ dependencies = [
 [[package]]
 name = "darklake-sdk-on-chain"
 version = "0.1.9"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=feature%2Fdar-727-add-label-ref-code#99792425b8ac47984f737efdf348d07725b0ed5f"
+source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=feature%2Fdar-727-add-label-ref-code#6f6e87ec1cd91994b28de40b92e5730c21735a13"
 dependencies = [
  "anchor-client",
  "anchor-lang",
@@ -1726,6 +1726,7 @@ dependencies = [
  "ark-serialize 0.5.0",
  "ark-std 0.5.0",
  "bincode",
+ "borsh 1.5.7",
  "dex-math",
  "hex",
  "lazy_static",
