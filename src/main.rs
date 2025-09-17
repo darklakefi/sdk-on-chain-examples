@@ -67,7 +67,7 @@ async fn manual_swap(
     let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap();
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -85,7 +85,7 @@ async fn manual_swap(
         salt, // Random salt for order uniqueness
     };
 
-    let swap_ix = sdk.swap_ix(swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -131,7 +131,7 @@ async fn manual_swap(
 
     let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
 
-    let finalize_ix = sdk.finalize_ix(finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -174,7 +174,7 @@ async fn manual_swap_different_settler(
     let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap();
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -192,7 +192,7 @@ async fn manual_swap_different_settler(
         salt, // Random salt for order uniqueness
     };
 
-    let swap_ix = sdk.swap_ix(swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -237,7 +237,7 @@ async fn manual_swap_different_settler(
 
     let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
 
-    let finalize_ix = sdk.finalize_ix(finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -277,14 +277,20 @@ async fn swap(mut sdk: DarklakeSDK, user_keypair: Keypair, rpc_client: RpcClient
     println!("Token X Mint: {}", token_mint_x);
     println!("Token Y Mint: {}", token_mint_y);
 
-    let res_quote = sdk.quote(token_mint_x, token_mint_y, 1_000).await?;
+    let res_quote = sdk.quote(&token_mint_x, &token_mint_y, 1_000).await?;
 
     println!("Quote: {:?}", res_quote);
 
     let unwrap_wsol = token_mint_y == Pubkey::from_str(SOL_MINT).unwrap();
 
     let (swap_tx, order_key, min_out, salt) = sdk
-        .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
+        .swap_tx(
+            &token_mint_x,
+            &token_mint_y,
+            1_000,
+            1,
+            &user_keypair.pubkey(),
+        )
         .await?;
 
     let tx = VersionedTransaction::try_new(swap_tx.message, &[&user_keypair])?;
@@ -293,7 +299,7 @@ async fn swap(mut sdk: DarklakeSDK, user_keypair: Keypair, rpc_client: RpcClient
     println!("Swap: {:?}", res);
 
     let finalize_tx: solana_sdk::transaction::VersionedTransaction = sdk
-        .finalize_tx(order_key, unwrap_wsol, min_out, salt, None)
+        .finalize_tx(&order_key, unwrap_wsol, min_out, salt, None)
         .await?;
 
     let tx = VersionedTransaction::try_new(finalize_tx.message, &[&user_keypair])?;
@@ -319,14 +325,20 @@ async fn swap_different_settler(
     println!("Token X Mint: {}", token_mint_x);
     println!("Token Y Mint: {}", token_mint_y);
 
-    let res_quote = sdk.quote(token_mint_x, token_mint_y, 1_000).await?;
+    let res_quote = sdk.quote(&token_mint_x, &token_mint_y, 1_000).await?;
 
     println!("Quote: {:?}", res_quote);
 
     let unwrap_wsol = token_mint_y == Pubkey::from_str(SOL_MINT).unwrap();
 
     let (swap_tx_, order_key, min_out, salt) = sdk
-        .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
+        .swap_tx(
+            &token_mint_x,
+            &token_mint_y,
+            1_000,
+            1,
+            &user_keypair.pubkey(),
+        )
         .await?;
 
     let tx = VersionedTransaction::try_new(swap_tx_.message, &[&user_keypair])?;
@@ -337,11 +349,11 @@ async fn swap_different_settler(
 
     let finalize_tx = sdk
         .finalize_tx(
-            order_key,
+            &order_key,
             unwrap_wsol,
             min_out,
             salt,
-            Some(settler.pubkey()),
+            Some(&settler.pubkey()),
         )
         .await?;
 
@@ -365,7 +377,7 @@ async fn manual_add_liquidity(
     let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap();
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -377,7 +389,7 @@ async fn manual_add_liquidity(
         max_amount_y: 1_000,
     };
 
-    let add_liquidity_ix = sdk.add_liquidity_ix(add_liquidity_params)?;
+    let add_liquidity_ix = sdk.add_liquidity_ix(&add_liquidity_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -426,12 +438,12 @@ async fn add_liquidity(
 
     let add_liquidity_tx = sdk
         .add_liquidity_tx(
-            token_mint_x,
-            token_mint_y,
+            &token_mint_x,
+            &token_mint_y,
             1_000,
             1_000,
             20,
-            user_keypair.pubkey(),
+            &user_keypair.pubkey(),
         )
         .await?;
 
@@ -455,7 +467,7 @@ async fn manual_remove_liquidity(
     let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap();
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -467,7 +479,7 @@ async fn manual_remove_liquidity(
         min_amount_y: 1,
     };
 
-    let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params)?;
+    let remove_liquidity_ix = sdk.remove_liquidity_ix(&remove_liquidity_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -515,7 +527,14 @@ async fn remove_liquidity(
     println!("Token Y Mint: {}", token_mint_y);
 
     let remove_liquidity_tx = sdk
-        .remove_liquidity_tx(token_mint_x, token_mint_y, 1, 1, 20, user_keypair.pubkey())
+        .remove_liquidity_tx(
+            &token_mint_x,
+            &token_mint_y,
+            1,
+            1,
+            20,
+            &user_keypair.pubkey(),
+        )
         .await?;
 
     let tx = VersionedTransaction::try_new(remove_liquidity_tx.message, &[&user_keypair])?;
@@ -542,7 +561,7 @@ async fn manual_swap_from_sol(
     println!("Token Y Mint (DuX): {}", token_mint_y);
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -564,7 +583,7 @@ async fn manual_swap_from_sol(
         salt,
     };
 
-    let swap_ix = sdk.swap_ix(swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -610,7 +629,7 @@ async fn manual_swap_from_sol(
         current_slot: rpc_client.get_slot()?,
     };
 
-    let finalize_ix = sdk.finalize_ix(finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -657,7 +676,7 @@ async fn manual_swap_to_sol(
     println!("Token Y Mint (WSOL): {}", token_mint_y);
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -676,7 +695,7 @@ async fn manual_swap_to_sol(
         salt,
     };
 
-    let swap_ix = sdk.swap_ix(swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -719,7 +738,7 @@ async fn manual_swap_to_sol(
         current_slot: rpc_client.get_slot()?,
     };
 
-    let finalize_ix = sdk.finalize_ix(finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
 
     // NOTE: Alternatively to unwrap_wsol you can manually unwrap the WSOL by closing the WSOL ATA
     let recent_blockhash = rpc_client
@@ -770,12 +789,18 @@ async fn swap_from_sol(
     println!("Token X Mint (SOL): {}", token_mint_x);
     println!("Token Y Mint (DuX): {}", token_mint_y);
 
-    let res_quote = sdk.quote(token_mint_x, token_mint_y, 1_000).await?;
+    let res_quote = sdk.quote(&token_mint_x, &token_mint_y, 1_000).await?;
 
     println!("Quote: {:?}", res_quote);
 
     let (swap_tx_, order_key, min_out, salt) = sdk
-        .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
+        .swap_tx(
+            &token_mint_x,
+            &token_mint_y,
+            1_000,
+            1,
+            &user_keypair.pubkey(),
+        )
         .await?;
 
     let tx = VersionedTransaction::try_new(swap_tx_.message, &[&user_keypair])?;
@@ -785,7 +810,7 @@ async fn swap_from_sol(
     println!("Swap: {:?}", res);
 
     let finalize_tx = sdk
-        .finalize_tx(order_key, true, min_out, salt, None)
+        .finalize_tx(&order_key, true, min_out, salt, None)
         .await?;
 
     let tx = VersionedTransaction::try_new(finalize_tx.message, &[&user_keypair])?;
@@ -811,12 +836,18 @@ async fn swap_to_sol(
     println!("Token X Mint (DuX): {}", token_mint_x);
     println!("Token Y Mint (SOL): {}", token_mint_y);
 
-    let res_quote = sdk.quote(token_mint_x, token_mint_y, 1_000).await?;
+    let res_quote = sdk.quote(&token_mint_x, &token_mint_y, 1_000).await?;
 
     println!("Quote: {:?}", res_quote);
 
     let (swap_tx_, order_key, min_out, salt) = sdk
-        .swap_tx(token_mint_x, token_mint_y, 1_000, 1, user_keypair.pubkey())
+        .swap_tx(
+            &token_mint_x,
+            &token_mint_y,
+            1_000,
+            1,
+            &user_keypair.pubkey(),
+        )
         .await?;
 
     let tx = VersionedTransaction::try_new(swap_tx_.message, &[&user_keypair])?;
@@ -826,7 +857,7 @@ async fn swap_to_sol(
     println!("Swap: {:?}", res);
 
     let finalize_tx = sdk
-        .finalize_tx(order_key, true, min_out, salt, None)
+        .finalize_tx(&order_key, true, min_out, salt, None)
         .await?;
 
     let tx = VersionedTransaction::try_new(finalize_tx.message, &[&user_keypair])?;
@@ -853,7 +884,7 @@ async fn manual_add_liquidity_sol(
     println!("Token Y Mint (DuX): {}", token_mint_y);
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -871,7 +902,7 @@ async fn manual_add_liquidity_sol(
         max_amount_y: token_amount, // DuX token amount
     };
 
-    let add_liquidity_ix = sdk.add_liquidity_ix(add_liquidity_params)?;
+    let add_liquidity_ix = sdk.add_liquidity_ix(&add_liquidity_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -924,7 +955,7 @@ async fn manual_remove_liquidity_sol(
     println!("Token Y Mint (DuX): {}", token_mint_y);
 
     println!("Loading pool...");
-    sdk.load_pool(token_mint_x, token_mint_y).await?;
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
 
     println!("Updating accounts...");
     sdk.update_accounts().await?;
@@ -944,7 +975,7 @@ async fn manual_remove_liquidity_sol(
         min_amount_y: 1, // Minimal DuX token amount to receive
     };
 
-    let remove_liquidity_ix = sdk.remove_liquidity_ix(remove_liquidity_params)?;
+    let remove_liquidity_ix = sdk.remove_liquidity_ix(&remove_liquidity_params)?;
 
     let unwrap_instructions = utils::get_unwrap_wsol_to_sol_instructions(user_keypair.pubkey())?;
 
@@ -997,7 +1028,14 @@ async fn remove_liquidity_sol(
     println!("Token Y Mint (DuX): {}", token_mint_y);
 
     let remove_liquidity_tx = sdk
-        .remove_liquidity_tx(token_mint_x, token_mint_y, 1, 1, 20, user_keypair.pubkey())
+        .remove_liquidity_tx(
+            &token_mint_x,
+            &token_mint_y,
+            1,
+            1,
+            20,
+            &user_keypair.pubkey(),
+        )
         .await?;
 
     let tx = VersionedTransaction::try_new(remove_liquidity_tx.message, &[&user_keypair])?;
@@ -1025,12 +1063,12 @@ async fn add_liquidity_sol(
 
     let add_liquidity_tx = sdk
         .add_liquidity_tx(
-            token_mint_x,
-            token_mint_y,
+            &token_mint_x,
+            &token_mint_y,
             1_000,
             1_000,
             20,
-            user_keypair.pubkey(),
+            &user_keypair.pubkey(),
         )
         .await?;
 
@@ -1043,7 +1081,7 @@ async fn add_liquidity_sol(
 }
 
 async fn manual_init_pool(
-    mut sdk: DarklakeSDK,
+    sdk: DarklakeSDK,
     user_keypair: Keypair,
     rpc_client: RpcClient,
 ) -> Result<()> {
@@ -1074,7 +1112,7 @@ async fn manual_init_pool(
     };
 
     println!("Initializing pool...");
-    let initialize_pool_ix = sdk.initialize_pool_ix(initialize_pool_params)?;
+    let initialize_pool_ix = sdk.initialize_pool_ix(&initialize_pool_params)?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -1129,11 +1167,11 @@ async fn init_pool(
     println!("Initializing pool...");
     let initialize_pool_tx = sdk
         .initialize_pool_tx(
-            token_mint_x,
-            token_mint_y,
+            &token_mint_x,
+            &token_mint_y,
             1_000,
             1_001,
-            user_keypair.pubkey(),
+            &user_keypair.pubkey(),
         )
         .await?;
 
@@ -1173,11 +1211,11 @@ async fn init_pool_sol(
     println!("Initializing pool...");
     let initialize_pool_tx = sdk
         .initialize_pool_tx(
-            token_mint_x,
-            token_mint_y,
+            &token_mint_x,
+            &token_mint_y,
             1_000,
             1_001,
-            user_keypair.pubkey(),
+            &user_keypair.pubkey(),
         )
         .await?;
 
