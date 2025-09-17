@@ -12,10 +12,10 @@ Both key files must exist in the project root directory.
 ## Available Functions
 
 ### Swaps
-- `manual_swap` - swaps using swap_ix
-- `swap` - swaps using swap_tx
-- `manual_swap_different_settler` - swaps using swap_ix with a different settler
-- `swap_different_settler` - swaps using swap_tx with a different settler
+- `manual_swap` - manual swap using swap_ix / finalize_ix
+- `swap` - swaps using swap_tx / finalize_tx
+- `manual_swap_different_settler` - swaps using swap_ix / finalize_ix with a different settler
+- `swap_different_settler` - swaps using swap_tx / finalize_tx with a different settler
 
 ### Liquidity Management
 - `manual_add_liquidity` - add liquidity using add_liquidity_ix
@@ -23,7 +23,7 @@ Both key files must exist in the project root directory.
 - `add_liquidity` - add liquidity using add_liquidity_tx
 - `remove_liquidity` - remove liquidity using remove_liquidity_tx
 
-### Same operations with SOL
+### SOL Operations
 - `manual_swap_from_sol` - swaps from SOL using swap_ix
 - `manual_swap_to_sol` - swaps to SOL using swap_ix
 - `swap_from_sol` - swaps from SOL using swap_tx
@@ -34,9 +34,9 @@ Both key files must exist in the project root directory.
 - `add_liquidity_sol` - add liquidity (one of the tokens is SOL) using add_liquidity_tx
 
 ### Pool Initialization
-- `manual_init_pool` - creates new tokens X and Y and initializes a pool using initialize_pool_ix
-- `init_pool` - creates new tokens X and Y and initializes a pool using initialize_pool_tx
-- `init_pool_sol` - creates new token X and initializes a pool with a SOL pair using initialize_pool_tx
+- `manual_init_pool` - manually creates new tokens X and Y and initializes a pool
+- `init_pool` - creates new tokens X and Y and initializes a pool
+- `init_pool_sol` - creates new token X and SOL and initializes a pool
 
 ## Usage
 
@@ -47,4 +47,9 @@ cargo run <function_name>
 Example:
 ```bash
 cargo run swap
+```
+
+Helper to run all the functions
+```bash
+./run_all_methods.sh
 ```

@@ -1,7 +1,11 @@
+use darklake_sdk_on_chain::{DarklakeSDK, Order};
+use tokio::time::{sleep, Duration};
+
 use anyhow::{Context, Result};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    address_lookup_table::state::AddressLookupTable, instruction::Instruction,
+    message::AddressLookupTableAccount, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
 use solana_system_interface::instruction::{create_account, transfer};
@@ -17,7 +21,6 @@ pub fn get_wrap_sol_to_wsol_instructions(
 ) -> Result<Vec<Instruction>> {
     let mut instructions = Vec::new();
 
-    // not other tokens can get wrapped only SOL -> WSOL
     let token_mint_wsol = native_mint::ID;
     let token_program_id = spl_token::ID;
 
@@ -82,7 +85,6 @@ pub async fn mint_tokens_to_user(
 ) -> Result<()> {
     let user_token_account = get_associated_token_address(&user_keypair.pubkey(), mint_pubkey);
 
-    // Create ATA and mint tokens in one transaction
     let create_ata_ix =
         spl_associated_token_account::instruction::create_associated_token_account_idempotent(
             &user_keypair.pubkey(),
@@ -143,9 +145,9 @@ pub async fn create_token_mint(
     let init_mint_ix = initialize_mint(
         &spl_token::ID,
         &mint_pubkey,
-        &user_keypair.pubkey(), // mint authority
-        None,                   // freeze authority
-        9,                      // decimals
+        &user_keypair.pubkey(),
+        None,
+        9,
     )?;
 
     let recent_blockhash = rpc_client
@@ -172,7 +174,6 @@ pub async fn create_new_tokens(
     user_keypair: &Keypair,
     mint_amount: u64,
 ) -> Result<(Pubkey, Pubkey)> {
-    // Generate new keypairs for the token mints
     let token_mint_x_keypair = Keypair::new();
     let token_mint_y_keypair = Keypair::new();
 
@@ -193,4 +194,51 @@ pub async fn create_new_tokens(
 
     println!("Successfully created and minted both tokens!");
     Ok((token_mint_x, token_mint_y))
+}
+
+pub async fn get_address_lookup_table(
+    rpc_client: &RpcClient,
+    lookup_table_pubkey: Pubkey,
+) -> Result<AddressLookupTableAccount> {
+    let alt_account = rpc_client
+        .get_account(&lookup_table_pubkey)
+        .context("Failed to get address lookup table")?;
+
+    let table = AddressLookupTable::deserialize(&alt_account.data)?;
+
+    let address_lookup_table = AddressLookupTableAccount {
+        key: lookup_table_pubkey,
+        addresses: table.addresses.to_vec(),
+    };
+
+    Ok(address_lookup_table)
+}
+
+pub async fn get_order(
+    sdk: &DarklakeSDK,
+    order_owner: &Pubkey,
+    rpc_client: &RpcClient,
+) -> Result<Order> {
+    for attempt in 1..=5 {
+        match sdk
+            .get_order(order_owner, rpc_client.commitment().commitment)
+            .await
+        {
+            Ok(result) => {
+                return Ok(result);
+            }
+            Err(e) => {
+                if attempt < 5 {
+                    println!(
+                        "get_order failed (attempt {}): {}. Retrying in 5 seconds...",
+                        attempt, e
+                    );
+                    sleep(Duration::from_secs(5)).await;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+    Err(anyhow::anyhow!("Failed to get order"))
 }
