@@ -1708,8 +1708,8 @@ dependencies = [
 
 [[package]]
 name = "darklake-sdk-on-chain"
-version = "0.1.9"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=feature%2Fdar-727-add-label-ref-code#6f6e87ec1cd91994b28de40b92e5730c21735a13"
+version = "0.2.0"
+source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=feature%2Fdar-727-add-label-ref-code#510b141717ba41da324ce4a0a6fbe4b984fc51ae"
 dependencies = [
  "anchor-client",
  "anchor-lang",

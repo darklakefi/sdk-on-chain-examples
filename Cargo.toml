@@ -7,7 +7,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-darklake-sdk-on-chain = { git = "https://github.com/darklakefi/sdk-on-chain.git", branch = "feature/dar-727-add-label-ref-code", version = "0.1.9" }
+darklake-sdk-on-chain = { git = "https://github.com/darklakefi/sdk-on-chain.git", branch = "feature/dar-727-add-label-ref-code", version = "0.2.0" }
 solana-sdk = "2.2.0"
 solana-rpc-client = "2.2.0"
 solana-rpc-client-api = "2.2.0"
