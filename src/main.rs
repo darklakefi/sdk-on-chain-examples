@@ -1,7 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use darklake_sdk_on_chain::{
-    AddLiquidityParamsIx, DarklakeSDK, FinalizeParamsIx, InitializePoolParamsIx,
-    RemoveLiquidityParamsIx, SwapMode, SwapParamsIx, DEVNET_LOOKUP,
+    AddLiquidityParamsIx, DEVNET_LOOKUP, DarklakeSDK, FinalizeParamsIx, InitializePoolParamsIx,
+    RemoveLiquidityParamsIx, SwapMode, SwapParamsIx,
 };
 
 use serde_json;
@@ -10,7 +10,7 @@ use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
-    message::{v0, VersionedMessage},
+    message::{VersionedMessage, v0},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::VersionedTransaction,
@@ -50,7 +50,7 @@ fn load_keypair(key_filename: &str) -> Result<Keypair> {
     }
 
     let keypair =
-        Keypair::try_from(key_bytes.as_slice()).context("Failed to create keypair from bytes")?;
+        Keypair::from_bytes(key_bytes.as_slice()).context("Failed to create keypair from bytes")?;
 
     Ok(keypair)
 }
@@ -85,7 +85,7 @@ async fn manual_swap(
         salt, // Random salt for order uniqueness
     };
 
-    let swap_ix = sdk.swap_ix(&swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -131,7 +131,7 @@ async fn manual_swap(
 
     let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
 
-    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -192,7 +192,7 @@ async fn manual_swap_different_settler(
         salt, // Random salt for order uniqueness
     };
 
-    let swap_ix = sdk.swap_ix(&swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -237,7 +237,7 @@ async fn manual_swap_different_settler(
 
     let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
 
-    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -389,7 +389,7 @@ async fn manual_add_liquidity(
         max_amount_y: 1_000,
     };
 
-    let add_liquidity_ix = sdk.add_liquidity_ix(&add_liquidity_params)?;
+    let add_liquidity_ix = sdk.add_liquidity_ix(&add_liquidity_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -479,7 +479,7 @@ async fn manual_remove_liquidity(
         min_amount_y: 1,
     };
 
-    let remove_liquidity_ix = sdk.remove_liquidity_ix(&remove_liquidity_params)?;
+    let remove_liquidity_ix = sdk.remove_liquidity_ix(&remove_liquidity_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -583,7 +583,7 @@ async fn manual_swap_from_sol(
         salt,
     };
 
-    let swap_ix = sdk.swap_ix(&swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -629,7 +629,7 @@ async fn manual_swap_from_sol(
         current_slot: rpc_client.get_slot()?,
     };
 
-    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -695,7 +695,7 @@ async fn manual_swap_to_sol(
         salt,
     };
 
-    let swap_ix = sdk.swap_ix(&swap_params)?;
+    let swap_ix = sdk.swap_ix(&swap_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -738,7 +738,7 @@ async fn manual_swap_to_sol(
         current_slot: rpc_client.get_slot()?,
     };
 
-    let finalize_ix = sdk.finalize_ix(&finalize_params)?;
+    let finalize_ix = sdk.finalize_ix(&finalize_params).await?;
 
     // NOTE: Alternatively to unwrap_wsol you can manually unwrap the WSOL by closing the WSOL ATA
     let recent_blockhash = rpc_client
@@ -902,7 +902,7 @@ async fn manual_add_liquidity_sol(
         max_amount_y: token_amount, // DuX token amount
     };
 
-    let add_liquidity_ix = sdk.add_liquidity_ix(&add_liquidity_params)?;
+    let add_liquidity_ix = sdk.add_liquidity_ix(&add_liquidity_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -975,7 +975,7 @@ async fn manual_remove_liquidity_sol(
         min_amount_y: 1, // Minimal DuX token amount to receive
     };
 
-    let remove_liquidity_ix = sdk.remove_liquidity_ix(&remove_liquidity_params)?;
+    let remove_liquidity_ix = sdk.remove_liquidity_ix(&remove_liquidity_params).await?;
 
     let unwrap_instructions = utils::get_unwrap_wsol_to_sol_instructions(user_keypair.pubkey())?;
 
@@ -1112,7 +1112,7 @@ async fn manual_init_pool(
     };
 
     println!("Initializing pool...");
-    let initialize_pool_ix = sdk.initialize_pool_ix(&initialize_pool_params)?;
+    let initialize_pool_ix = sdk.initialize_pool_ix(&initialize_pool_params).await?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
@@ -1246,9 +1246,15 @@ async fn main() -> Result<()> {
         println!("  swap_different_settler  - swaps using swap_tx with a different settler");
 
         println!("  manual_add_liquidity_sol  - add liquidity using add_liquidity_ix with SOL");
-        println!("  manual_remove_liquidity_sol  - remove liquidity (one of the tokens is SOL) using remove_liquidity_ix");
-        println!("  remove_liquidity_sol  - remove liquidity (one of the tokens is SOL) using remove_liquidity_tx");
-        println!("  add_liquidity_sol  - add liquidity (one of the tokens is SOL) using add_liquidity_tx");
+        println!(
+            "  manual_remove_liquidity_sol  - remove liquidity (one of the tokens is SOL) using remove_liquidity_ix"
+        );
+        println!(
+            "  remove_liquidity_sol  - remove liquidity (one of the tokens is SOL) using remove_liquidity_tx"
+        );
+        println!(
+            "  add_liquidity_sol  - add liquidity (one of the tokens is SOL) using add_liquidity_tx"
+        );
 
         println!("  manual_swap_from_sol  - swaps from SOL using swap_ix");
         println!("  manual_swap_to_sol  - swaps to SOL using swap_ix");
