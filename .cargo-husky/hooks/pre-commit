@@ -7,5 +7,5 @@ echo "Running pre-commit hooks..."
 files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.rs$' || true)
 [ -z "$files" ] && exit 0
 
-# Check each staged file with rustfmt --check
-echo "$files" | xargs -r rustfmt --edition 2021 --check
+# Check formatting using rustfmt on staged files only with root rustfmt.toml
+echo "$files" | xargs -r rustfmt --config-path rustfmt.toml --check
