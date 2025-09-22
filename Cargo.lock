@@ -1710,9 +1710,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "darklake-poseidon-ark"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89c73e9d8ea3931874e6512a8b3c40c7e9929fe8d19aa401182c1419c6177fc2"
+dependencies = [
+ "ark-bn254 0.4.0",
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
+ "ark-std 0.4.0",
+]
+
+[[package]]
 name = "darklake-sdk-on-chain"
-version = "0.3.0"
-source = "git+https://github.com/darklakefi/sdk-on-chain.git?branch=main#978f536bd7ffbfaba428a4c1493e3ffbd11f8f6a"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee838d3e7f165302bbf9b949dbec6a3d88442dbd37d156edfee5531e6cac1c3e"
 dependencies = [
  "anchor-client",
  "anchor-lang",
@@ -1730,6 +1743,7 @@ dependencies = [
  "ark-std 0.5.0",
  "bincode",
  "borsh 1.5.7",
+ "darklake-poseidon-ark",
  "dex-math",
  "hex",
  "lazy_static",
@@ -1737,7 +1751,6 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-traits",
  "password-hash",
- "poseidon-ark",
  "rust_decimal",
  "serde_json",
  "solana-account-decoder",
@@ -1992,7 +2005,8 @@ dependencies = [
 [[package]]
 name = "dex-math"
 version = "0.1.5"
-source = "git+https://github.com/darklakefi/dex-math.git?branch=main#ce2483318151726a3a8fe8be5fcfd5aec73ebc6e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d236af12cb43b68cf6a4551c0d460996a25d2ee95f85911f19c382110be4c34"
 dependencies = [
  "anchor-lang",
  "borsh 0.10.4",
@@ -4305,17 +4319,6 @@ name = "portable-atomic"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483"
-
-[[package]]
-name = "poseidon-ark"
-version = "0.0.1"
-source = "git+https://github.com/darklakefi/poseidon-ark.git?branch=gateway#c80663281ef67a814738d2a2adf2bef365d5980d"
-dependencies = [
- "ark-bn254 0.4.0",
- "ark-ff 0.4.2",
- "ark-serialize 0.4.2",
- "ark-std 0.4.0",
-]
 
 [[package]]
 name = "potential_utf"
