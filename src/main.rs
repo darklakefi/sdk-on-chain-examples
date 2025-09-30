@@ -55,6 +55,17 @@ fn load_keypair(key_filename: &str) -> Result<Keypair> {
     Ok(keypair)
 }
 
+async fn quote(mut sdk: DarklakeSDK) -> Result<()> {
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap();
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap();
+    let amount_in = 1_000;
+
+    println!("\nGetting quote...");
+    let quote = sdk.quote(&token_mint_x, &token_mint_y, amount_in).await?;
+    println!("Quote: {:?}", quote);
+    Ok(())
+}
+
 async fn manual_swap(
     mut sdk: DarklakeSDK,
     user_keypair: Keypair,
@@ -79,7 +90,7 @@ async fn manual_swap(
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
-        in_amount: 1_000,
+        amount_in: 1_000,
         swap_mode: SwapMode::ExactIn,
         min_out,
         salt, // Random salt for order uniqueness
@@ -161,6 +172,122 @@ async fn manual_swap(
     Ok(())
 }
 
+async fn manual_swap_slash(
+    mut sdk: DarklakeSDK,
+    user_keypair: Keypair,
+    rpc_client: RpcClient,
+) -> Result<()> {
+    println!("Darklake DEX SDK - Manual Swap");
+    println!("===============================");
+
+    let token_mint_x = Pubkey::from_str(TOKEN_MINT_X).unwrap();
+    let token_mint_y = Pubkey::from_str(TOKEN_MINT_Y).unwrap();
+
+    println!("Loading pool...");
+    sdk.load_pool(&token_mint_x, &token_mint_y).await?;
+
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
+
+    let salt = [1, 2, 3, 4, 5, 6, 7, 8];
+    let min_out = 1;
+
+    let swap_params = SwapParamsIx {
+        source_mint: token_mint_x,
+        destination_mint: token_mint_y,
+        token_transfer_authority: user_keypair.pubkey(),
+        amount_in: 1_000,
+        swap_mode: SwapMode::ExactIn,
+        min_out,
+        salt, // Random salt for order uniqueness
+    };
+
+    let swap_ix = sdk.swap_ix(&swap_params).await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    let address_lookup_table = get_address_lookup_table(&rpc_client, DEVNET_LOOKUP).await?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
+        &[swap_ix],
+        &[address_lookup_table.clone()],
+        recent_blockhash,
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
+
+    println!("Swap transaction signature: {}", transaction.signatures[0]);
+
+    let _swap_signature = rpc_client.send_and_confirm_transaction_with_spinner(&transaction)?;
+
+    // Retry get_order up to 5 times with 5 second delays
+    let order = get_order(&sdk, &user_keypair.pubkey(), &rpc_client).await?;
+
+    println!("Updating accounts...");
+    sdk.update_accounts().await?;
+
+    // Wait for order to expire
+    let mut current_slot = rpc_client.get_slot()?;
+    while order.deadline >= current_slot + 1 {
+        current_slot = rpc_client.get_slot()?;
+        println!("Waiting for order to expire...");
+        println!("Current slot: {}", current_slot);
+        println!("Order deadline: {}", order.deadline);
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+
+    let finalize_params = FinalizeParamsIx {
+        settle_signer: user_keypair.pubkey(),
+        order_owner: user_keypair.pubkey(),
+        unwrap_wsol: false, // Set to true to unwrap WSOL using dex (no extra instruction added)
+        min_out,            // Same min_out as swap
+        salt,               // Same salt as swap
+        output: order.d_out, // on-chain order value
+        commitment: order.c_min, // on-chain order value
+        deadline: order.deadline, // on-chain order value
+        current_slot: current_slot + 1,
+    };
+
+    let compute_budget_ix: Instruction = ComputeBudgetInstruction::set_compute_unit_limit(500_000);
+
+    let finalize_ix = sdk.finalize_ix(&finalize_params).await?;
+
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
+        .context("Failed to get recent blockhash")?;
+
+    let message_v0 = v0::Message::try_compile(
+        &user_keypair.pubkey(),
+        &[compute_budget_ix, finalize_ix],
+        &[address_lookup_table],
+        recent_blockhash,
+    )?;
+
+    let mut transaction = VersionedTransaction {
+        signatures: vec![],
+        message: VersionedMessage::V0(message_v0),
+    };
+
+    transaction.signatures = vec![user_keypair.sign_message(&transaction.message.serialize())];
+
+    let _finalize_signature = rpc_client.send_and_confirm_transaction_with_spinner(&transaction)?;
+
+    println!(
+        "Finalize transaction signature: {}",
+        transaction.signatures[0]
+    );
+
+    Ok(())
+}
+
 async fn manual_swap_different_settler(
     mut sdk: DarklakeSDK,
     user_keypair: Keypair,
@@ -186,7 +313,7 @@ async fn manual_swap_different_settler(
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
-        in_amount: 1_000,
+        amount_in: 1_000,
         swap_mode: SwapMode::ExactIn,
         min_out,
         salt, // Random salt for order uniqueness
@@ -577,7 +704,7 @@ async fn manual_swap_from_sol(
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
-        in_amount: sol_amount,
+        amount_in: sol_amount,
         swap_mode: SwapMode::ExactIn,
         min_out,
         salt,
@@ -689,7 +816,7 @@ async fn manual_swap_to_sol(
         source_mint: token_mint_x,
         destination_mint: token_mint_y,
         token_transfer_authority: user_keypair.pubkey(),
-        in_amount: token_amount,
+        amount_in: token_amount,
         swap_mode: SwapMode::ExactIn,
         min_out,
         salt,
@@ -1234,7 +1361,9 @@ async fn main() -> Result<()> {
     if args.len() < 2 {
         println!("Usage: {} <function_name>", args[0]);
         println!("Available functions:");
+        println!("  quote  - returns a quote");
         println!("  manual_swap  - swaps using swap_ix");
+        println!("  manual_swap_slash  - swaps using swap_ix with slash");
         println!("  swap  - swaps using swap_tx");
 
         println!("  manual_add_liquidity  - add liquidity using add_liquidity_ix");
@@ -1300,6 +1429,10 @@ async fn main() -> Result<()> {
     let settler_key_filename = "settler_key.json";
 
     match args[1].as_str() {
+        "quote" => {
+            println!("Running quote()...");
+            quote(sdk).await
+        }
         "manual_swap" => {
             println!("Running manual_swap()...");
             manual_swap(sdk, load_keypair(user_key_filename)?, rpc_client).await
@@ -1313,6 +1446,10 @@ async fn main() -> Result<()> {
                 rpc_client,
             )
             .await
+        }
+        "manual_swap_slash" => {
+            println!("Running manual_swap_slash()...");
+            manual_swap_slash(sdk, load_keypair(user_key_filename)?, rpc_client).await
         }
         "swap" => {
             println!("Running swap()...");
