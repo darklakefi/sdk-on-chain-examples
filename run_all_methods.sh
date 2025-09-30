@@ -13,6 +13,7 @@ echo
 # Array of all available methods
 methods=(
     "manual_swap"
+    "manual_swap_slash"
     "manual_swap_different_settler"
     "swap"
     "swap_different_settler"
