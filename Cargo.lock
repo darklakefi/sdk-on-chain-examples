@@ -1723,9 +1723,9 @@ dependencies = [
 
 [[package]]
 name = "darklake-sdk-on-chain"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee838d3e7f165302bbf9b949dbec6a3d88442dbd37d156edfee5531e6cac1c3e"
+checksum = "01db15d849ea5b70b938c48495430923ba163b97cebe82700d3379d71ce7e5be"
 dependencies = [
  "anchor-client",
  "anchor-lang",
@@ -5262,7 +5262,7 @@ dependencies = [
 
 [[package]]
 name = "sdk-on-chain-examples"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
